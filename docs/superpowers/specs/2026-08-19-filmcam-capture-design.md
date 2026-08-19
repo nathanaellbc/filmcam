@@ -276,6 +276,34 @@ LZ-family compression is useless here — sensor noise yields ~1.1:1. A predicto
 
 Expected ratio 2.2–2.6:1 on typical footage, consistent with RAW Cam's published ~12 GB/min.
 
+> ### ⚠️ Provisional measurement, 2026-08-19 — the assumption above is NOT yet met
+>
+> The Stage W reference implementation (`tools/fcr-reference`) now exists and has been
+> measured. On **synthetic** photon-noise-dominated frames it achieves:
+>
+> | Fixture | Ratio | Implied rate @24 fps |
+> |---|---|---|
+> | 512×512 photon-noise proxy | **1.712:1** | — |
+> | Full 4032×3024 synthetic frame | **1.763:1** | ~294 MB/s |
+>
+> Both are **below the 2.0:1 floor** this design depends on. At 1.76:1, 12 MP open gate
+> needs ~294 MB/s sustained rather than the ~200 MB/s assumed in §2.1.
+>
+> **This does not yet invalidate §2.1**, and the primary mode has deliberately not been
+> changed, because the fixture is uniform photon noise across the entire frame. Real
+> footage is dominated by smooth regions — sky, walls, skin — whose residuals are far
+> smaller, and real ratios are normally better. Revising the capture mode on a
+> pessimistic synthetic would be acting on the wrong number.
+>
+> **The gate remains a measurement on real iPhone 15 Bayer data** (Stage W, Task 7,
+> Step 7), which has not run because no footage exists yet. To close it: shoot ~10 s in
+> RAW Cam on the target device, export the DNGs, and run
+> `python -m fcrref.analyze --input "path/*.dng"`. `rawpy` is confirmed working on
+> Python 3.13, so that path is ready.
+>
+> **If real footage also lands below 2.0:1**, §2.1's primary mode must change before
+> Stage M0 begins. The fallbacks are named below: 4K crop, or 18 fps.
+
 **Fallback if throughput targets are missed:** drop to 4K crop (350 MB/s uncompressed) or
 reduce to 18 fps. Both are preferable to dropping frames.
 

@@ -1,0 +1,32 @@
+# Brainstorming visual companion — session servers, screens, and state
+.superpowers/
+
+# macOS
+.DS_Store
+
+# Xcode (for when the Swift work starts)
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Packages/
+
+# Stage W reference implementation (Rust / Python)
+target/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Captured media and generated test assets — large, regenerable
+*.fcr
+*.fcm
+*.dng
+*.mcraw
+/testdata/generated/

@@ -106,6 +106,7 @@ def _read_plane(reader: BitReader, count: int) -> np.ndarray:
                 r = reader.read_bits(k) if k else 0
                 out[index] = (q << k) | r
             else:
+                reader.read_bits(1)  # consume the escape terminator
                 out[index] = reader.read_bits(RAW_BITS)
             index += 1
     return out

@@ -19,8 +19,33 @@ def test_roundtrip_random_small():
     assert np.array_equal(rice.decode_plane(data, res.shape), res)
 
 
-def test_roundtrip_extremes_forces_escape_path():
+def test_roundtrip_large_magnitude_values():
+    """Large-magnitude values on the normal (non-escape) Rice path.
+
+    NOTE: despite what an earlier name for this test claimed, these values
+    do NOT force the escape path — with only 4 samples, choose_k picks a
+    large k (14) that keeps q small (q in {0, 1}) for all of them. See
+    test_roundtrip_forces_true_escape_path for actual escape-path coverage.
+    """
     res = np.array([[16383, -16383, 0, 16383]], dtype=np.int32)
+    data = rice.encode_plane(res)
+    assert np.array_equal(rice.decode_plane(data, res.shape), res)
+
+
+def test_roundtrip_forces_true_escape_path():
+    """A mostly-zero block with a rare large outlier makes k=0 optimal,
+    which makes the outlier's q >= RICE_LIMIT and genuinely triggers the
+    escape path (RICE_LIMIT zero bits + terminator + RAW_BITS raw value).
+
+    This reproduces the encode/decode desync found in review: the decoder
+    must consume the escape terminator bit that read_unary(RICE_LIMIT)
+    leaves unconsumed, or every value after the first escape in the block
+    decodes as garbage.
+    """
+    res = np.zeros((1, BLOCK_SIZE), dtype=np.int32)
+    res[0, 0] = 16000
+    res[0, 100] = 5
+    res[0, 200] = -3
     data = rice.encode_plane(res)
     assert np.array_equal(rice.decode_plane(data, res.shape), res)
 

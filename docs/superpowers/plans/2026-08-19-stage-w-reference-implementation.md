@@ -932,6 +932,21 @@ git commit -m "feat(fcrref): add Rice code-length calculation and adaptive k sel
 
 The critical test is that the encoder's actual bit count equals `plane_bit_length` exactly. If those diverge, the ratio measured in Task 7 is a lie.
 
+> **Escape-path warning — this bit the first implementation.**
+>
+> Matching *lengths* is not the same as matching *bit consumption*. The encoder
+> writes an escape marker as `write_bits(1, RICE_LIMIT + 1)` — 24 zeros **plus a
+> terminating 1** — but `read_unary(RICE_LIMIT)` stops after 24 bits and does not
+> consume that terminator. The decoder must consume it explicitly, or it reads the
+> raw value one bit early and desynchronises everything after it.
+>
+> This is invisible to ordinary tests. `choose_k` picks a `k` around 14–15 for
+> uniformly distributed data, so `q < RICE_LIMIT` everywhere and the escape never
+> fires. The escape is only optimal for **skewed** data: many near-zero values plus
+> a rare large outlier. Any test that claims to cover the escape path must assert
+> `choose_k` actually returns a low `k` for its fixture — otherwise it covers
+> nothing while appearing to.
+
 - [ ] **Step 1: Write the failing test**
 
 `tools/fcr-reference/tests/test_rice_bitstream.py`:
@@ -958,8 +973,26 @@ def test_roundtrip_random_small():
     assert np.array_equal(rice.decode_plane(data, res.shape), res)
 
 
-def test_roundtrip_extremes_forces_escape_path():
+def test_roundtrip_full_scale_values_on_the_normal_path():
+    """Full-scale residuals. NOTE: this does NOT escape — choose_k picks
+    k=14 here, giving q in {0,1}. Kept because large-magnitude values on the
+    normal path are still worth covering. The escape test is below."""
     res = np.array([[16383, -16383, 0, 16383]], dtype=np.int32)
+    data = rice.encode_plane(res)
+    assert np.array_equal(rice.decode_plane(data, res.shape), res)
+
+
+def test_roundtrip_forces_a_genuine_escape():
+    """The escape fires only for SKEWED data: a block of near-zeros with a
+    rare large outlier, where choose_k picks a low k. Uniform random data
+    never escapes, because choose_k finds a k around 14-15 that caps every
+    value's cost. Without this test the decoder's escape branch is entirely
+    uncovered and a one-bit desync passes the whole suite."""
+    res = np.zeros((1, BLOCK_SIZE), dtype=np.int32)
+    res[0, 0] = 16000
+    res[0, 100] = 5
+    res[0, 200] = -3
+    assert rice.choose_k(rice.zigzag(res).ravel()) == 0  # escape really fires
     data = rice.encode_plane(res)
     assert np.array_equal(rice.decode_plane(data, res.shape), res)
 
@@ -1038,6 +1071,11 @@ def _read_plane(reader: BitReader, count: int) -> np.ndarray:
                 r = reader.read_bits(k) if k else 0
                 out[index] = (q << k) | r
             else:
+                # read_unary consumed RICE_LIMIT bits and stopped WITHOUT
+                # consuming the terminating 1 bit the encoder wrote as part
+                # of write_bits(1, RICE_LIMIT + 1). Consume it here, or the
+                # raw value is read one bit early and the stream desyncs.
+                reader.read_bits(1)
                 out[index] = reader.read_bits(RAW_BITS)
             index += 1
     return out

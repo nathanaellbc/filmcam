@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from .bitio import BitReader, BitWriter
 from .constants import BLOCK_SIZE, K_BITS, K_MAX, RAW_BITS, RICE_LIMIT
 
 ESCAPE_LENGTH = RICE_LIMIT + 1 + RAW_BITS
@@ -72,3 +73,52 @@ def plane_bit_length(residuals: np.ndarray) -> int:
         k = choose_k(block)
         total += K_BITS + int(code_length(block, k).sum())
     return total
+
+
+def _write_plane(writer: BitWriter, residuals: np.ndarray) -> None:
+    """Write a plane's residuals into an existing BitWriter."""
+    values = zigzag(residuals).ravel()
+    for start, stop in block_ranges(values.size):
+        block = values[start:stop]
+        k = choose_k(block)
+        writer.write_bits(k, K_BITS)
+        mask = (1 << k) - 1
+        for u in block.tolist():
+            q = u >> k
+            if q < RICE_LIMIT:
+                writer.write_bits(1, q + 1)      # q zeros then a 1
+                if k:
+                    writer.write_bits(u & mask, k)
+            else:
+                writer.write_bits(1, RICE_LIMIT + 1)
+                writer.write_bits(u, RAW_BITS)
+
+
+def _read_plane(reader: BitReader, count: int) -> np.ndarray:
+    """Read `count` zigzag values from an existing BitReader."""
+    out = np.empty(count, dtype=np.uint32)
+    index = 0
+    for start, stop in block_ranges(count):
+        k = reader.read_bits(K_BITS)
+        for _ in range(stop - start):
+            q = reader.read_unary(RICE_LIMIT)
+            if q < RICE_LIMIT:
+                r = reader.read_bits(k) if k else 0
+                out[index] = (q << k) | r
+            else:
+                out[index] = reader.read_bits(RAW_BITS)
+            index += 1
+    return out
+
+
+def encode_plane(residuals: np.ndarray) -> bytes:
+    writer = BitWriter()
+    _write_plane(writer, residuals)
+    return writer.flush()
+
+
+def decode_plane(data: bytes, shape: tuple[int, int]) -> np.ndarray:
+    height, width = shape
+    reader = BitReader(data)
+    values = _read_plane(reader, height * width)
+    return unzigzag(values).reshape(height, width)

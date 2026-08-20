@@ -1,0 +1,4 @@
+# Conformance vectors are the deliverable: their SHA-256 is pinned in
+# manifest.json. Nothing here may be touched by line-ending conversion
+# on checkout, on any platform or any user's core.autocrlf setting.
+* -text

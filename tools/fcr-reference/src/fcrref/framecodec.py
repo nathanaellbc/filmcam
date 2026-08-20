@@ -15,6 +15,7 @@ import struct
 import numpy as np
 
 from .bayer import PLANE_ORDER, merge_planes, split_planes
+from .constants import MAX_VALUE
 from .predictor import forward, inverse
 from .rice import decode_plane, encode_plane, plane_bit_length
 
@@ -37,7 +38,22 @@ def _strip_bounds(height: int, strips: int) -> list[tuple[int, int]]:
     return bounds
 
 
+def _check_range(mosaic: np.ndarray) -> None:
+    """Reject samples the Rice coder cannot represent.
+
+    encode_frame would fail deep inside rice.py with a per-value message;
+    estimate_frame_bits would silently succeed and report a ratio for a
+    bitstream that cannot physically be produced. Both call this so the
+    estimator and the encoder accept exactly the same inputs.
+    """
+    if mosaic.size and int(mosaic.max()) > MAX_VALUE:
+        raise ValueError(
+            f"sample {int(mosaic.max())} exceeds MAX_VALUE {MAX_VALUE}"
+        )
+
+
 def encode_frame(mosaic: np.ndarray, pattern: str, strips: int = 1) -> bytes:
+    _check_range(mosaic)
     planes = split_planes(mosaic, pattern)
     plane_height = planes[PLANE_ORDER[0]].shape[0]
     bounds = _strip_bounds(plane_height, strips)
@@ -83,6 +99,7 @@ def decode_frame(payload: bytes, height: int, width: int, pattern: str) -> np.nd
 
 def estimate_frame_bits(mosaic: np.ndarray, pattern: str, strips: int = 1) -> int:
     """Total bitstream bits, excluding the payload header. Used by analyze."""
+    _check_range(mosaic)
     planes = split_planes(mosaic, pattern)
     plane_height = planes[PLANE_ORDER[0]].shape[0]
     bounds = _strip_bounds(plane_height, strips)

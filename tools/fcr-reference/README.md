@@ -12,6 +12,13 @@ Rice codec. Platform-agnostic; no Apple dependencies.
 
     python -m fcrref.analyze --input path/to/clip/*.dng
 
+The bit depth is read from each DNG's white level and printed alongside
+the ratio: scoring a 12-bit capture against a 14-bit baseline inflates
+the result by ~17%, in the optimistic direction, against a 2.0:1
+decision threshold. Headerless inputs cannot say, so declare it:
+
+    python -m fcrref.analyze --input '*.raw16' --raw16 3024x4032 --bit-depth 12
+
 ## Regenerate conformance vectors
 
     python -m fcrref.vectors --out vectors/

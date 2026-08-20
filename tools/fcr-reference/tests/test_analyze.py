@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from fcrref import analyze
 from fcrref.constants import BIT_DEPTH
@@ -57,3 +58,66 @@ def test_load_raw16_reads_little_endian_pairs(tmp_path):
     path = tmp_path / "frame.raw16"
     path.write_bytes(src.astype("<u2").tobytes())
     assert np.array_equal(analyze.load_raw16(str(path), 4, 6), src)
+
+
+def test_raw_bits_honours_a_twelve_bit_source():
+    """A 12-bit DNG must not be scored against a 14-bit baseline: that
+    inflates every ratio by 14/12 in the optimistic direction."""
+    m = np.zeros((64, 64), dtype=np.uint16)
+    stats = analyze.analyze_frame(m, "RGGB", bit_depth=12)
+    assert stats.bit_depth == 12
+    assert stats.raw_bits == 64 * 64 * 12
+    assert stats.raw_bits < analyze.analyze_frame(m, "RGGB").raw_bits
+
+
+def test_per_plane_ratios_also_honour_the_bit_depth():
+    rng = np.random.default_rng(7)
+    m = rng.integers(0, 4096, size=(64, 64), dtype=np.uint16)
+    at14 = analyze.analyze_frame(m, "RGGB")
+    at12 = analyze.analyze_frame(m, "RGGB", bit_depth=12)
+    for name in at12.per_plane_ratio:
+        assert at12.per_plane_ratio[name] == pytest.approx(
+            at14.per_plane_ratio[name] * 12 / 14
+        )
+
+
+def test_bit_depth_is_derived_from_the_white_level():
+    assert analyze._bit_depth_from_white_level(16383) == 14
+    assert analyze._bit_depth_from_white_level(4095) == 12
+    assert analyze._bit_depth_from_white_level(1023) == 10
+    assert analyze._bit_depth_from_white_level([4095, 4095, 4095, 4095]) == 12
+
+
+def test_bit_depth_falls_back_when_the_file_says_nothing_usable():
+    assert analyze._bit_depth_from_white_level(0) == BIT_DEPTH
+    assert analyze._bit_depth_from_white_level(None) == BIT_DEPTH
+
+
+def test_colour_descriptor_is_read_from_the_file_not_assumed():
+    class Raw:
+        color_desc = b"RGBG"
+
+    class Odd:
+        color_desc = b"GRBG"
+
+    class Silent:
+        color_desc = None
+
+    assert analyze._color_desc(Raw()) == "RGBG"
+    assert analyze._color_desc(Odd()) == "GRBG"
+    assert analyze._color_desc(Silent()) == "RGBG"
+
+
+def test_report_prints_the_bit_depth(capsys):
+    m = np.zeros((8, 8), dtype=np.uint16)
+    analyze._report(["fake.dng"], lambda _p: (m, "RGGB", 12), None)
+    out = capsys.readouterr().out
+    assert "12-bit" in out
+
+
+def test_report_rejects_out_of_range_samples_instead_of_reporting_a_ratio():
+    """The estimator must not print a confident ratio for a bitstream the
+    encoder cannot produce."""
+    m = np.full((8, 8), 40000, dtype=np.uint16)
+    with pytest.raises(ValueError):
+        analyze.analyze_frame(m, "RGGB")

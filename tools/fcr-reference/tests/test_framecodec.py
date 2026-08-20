@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from fcrref import framecodec
-from fcrref.constants import CFA_PATTERNS
+from fcrref.constants import CFA_PATTERNS, MAX_VALUE
 
 
 def _frame(height=64, width=96, seed=20260819):
@@ -62,3 +62,20 @@ def test_rejects_strip_count_exceeding_plane_height():
 def test_output_is_deterministic():
     m = _frame()
     assert framecodec.encode_frame(m, "RGGB") == framecodec.encode_frame(m, "RGGB")
+
+
+def test_estimator_and_encoder_agree_on_rejecting_out_of_range_input():
+    """analyze is built entirely on the estimator. If the estimator accepts
+    what encode_frame cannot physically produce, analyze prints a confident
+    ratio for a bitstream that does not exist."""
+    m = np.full((8, 8), 40000, dtype=np.uint16)
+    with pytest.raises(ValueError):
+        framecodec.encode_frame(m, "RGGB")
+    with pytest.raises(ValueError):
+        framecodec.estimate_frame_bits(m, "RGGB")
+
+
+def test_max_value_itself_is_accepted():
+    m = np.full((8, 8), MAX_VALUE, dtype=np.uint16)
+    assert framecodec.estimate_frame_bits(m, "RGGB") > 0
+    assert framecodec.encode_frame(m, "RGGB")

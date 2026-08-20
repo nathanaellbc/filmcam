@@ -1,9 +1,21 @@
+import hashlib
 import json
+import pathlib
 
 import numpy as np
 
 from fcrref import vectors
-from fcrref.constants import HEADER_SIZE
+from fcrref.bayer import PLANE_ORDER
+from fcrref.constants import (
+    BIT_DEPTH,
+    BLOCK_SIZE,
+    HEADER_SIZE,
+    K_BITS,
+    K_MAX,
+    MAX_VALUE,
+    RAW_BITS,
+    RICE_LIMIT,
+)
 from fcrref.container import FcrReader, unpack_header
 from fcrref.sidecar import find_gaps, read_sidecar
 
@@ -149,3 +161,76 @@ def test_vectors_include_vectorscope_ground_truth(tmp_path):
         (tmp_path / "scope_vector_flat.i64").read_bytes(), dtype="<i8"
     )
     assert data.size == 256 * 256
+
+
+# --- The committed vectors are a contract, not documentation -------------
+#
+# Every test above generates into a tmp_path and compares generation to
+# generation, so a one-character change to predictor.py, rice.py or
+# framecodec.py would leave the suite green while every committed SHA-256
+# went stale — and the Swift port would then validate against bytes the
+# reference no longer produces. These tests read the committed files.
+
+_VECTORS_DIR = pathlib.Path(__file__).resolve().parents[1] / "vectors"
+
+
+def _committed_manifest() -> dict:
+    with open(_VECTORS_DIR / "manifest.json", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def test_committed_vectors_directory_exists():
+    """Derived from __file__, never from the working directory."""
+    assert (_VECTORS_DIR / "manifest.json").is_file(), _VECTORS_DIR
+
+
+def test_committed_artifacts_match_their_recorded_hashes():
+    manifest = _committed_manifest()
+    assert manifest["artifacts"]
+    for entry in manifest["artifacts"]:
+        path = _VECTORS_DIR / entry["name"]
+        assert path.is_file(), f"{entry['name']} is missing from vectors/"
+        data = path.read_bytes()
+        assert len(data) == entry["bytes"], entry["name"]
+        assert hashlib.sha256(data).hexdigest() == entry["sha256"], (
+            f"{entry['name']} no longer matches its committed SHA-256. "
+            "Regenerate with `python -m fcrref.vectors --out vectors/` and "
+            "review the diff: the Swift port validates against these bytes."
+        )
+
+
+def test_no_vector_file_is_unregistered():
+    """A new file that was never added to the manifest is caught too."""
+    manifest = _committed_manifest()
+    registered = {e["name"] for e in manifest["artifacts"]}
+    on_disk = {
+        p.name
+        for p in _VECTORS_DIR.iterdir()
+        if p.is_file() and p.name != "manifest.json" and not p.name.startswith(".")
+    }
+    assert on_disk == registered
+
+
+def test_regenerating_reproduces_the_committed_bytes_exactly(tmp_path):
+    """The strongest form: the code as it stands today still emits the
+    committed vectors, byte for byte."""
+    fresh = vectors.generate(str(tmp_path))
+    committed = _committed_manifest()
+    assert fresh == committed
+    for entry in committed["artifacts"]:
+        assert (tmp_path / entry["name"]).read_bytes() == (
+            _VECTORS_DIR / entry["name"]
+        ).read_bytes(), entry["name"]
+
+
+def test_committed_constants_match_the_live_constants():
+    """The pinned block must not drift from constants.py."""
+    constants = _committed_manifest()["constants"]
+    assert constants["bit_depth"] == BIT_DEPTH
+    assert constants["raw_bits"] == RAW_BITS
+    assert constants["rice_limit"] == RICE_LIMIT
+    assert constants["block_size"] == BLOCK_SIZE
+    assert constants["k_bits"] == K_BITS
+    assert constants["k_max"] == K_MAX
+    assert constants["max_value"] == MAX_VALUE
+    assert constants["plane_order"] == list(PLANE_ORDER)

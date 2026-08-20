@@ -23,7 +23,10 @@ from .constants import (
 )
 from .framecodec import decode_frame, encode_frame
 
-_HDR_FIXED = "<4sHIIB16s2I4H4I9f9f3f16sff9fQ?16sQ32s"
+# Wire order: magic, version, flags, width, height, bit_depth, ...
+# `flags` is last in ClipHeader (it is defaulted) but third on the wire.
+_HDR_FIXED = "<4sHIIIB16s2I4H4I9f9f3f16sff9fQ?16sQ32s"
+_HDR_VERSION = 1
 
 # Frame-record layout. Public (no leading underscore): Task 9's repair.py
 # imports these names from this module as a documented cross-module contract.
@@ -64,6 +67,7 @@ class ClipHeader:
     start_timecode: str
     created_at_ns: int
     device_model: str
+    flags: int = 0
 
 
 @dataclass(frozen=True)
@@ -79,7 +83,8 @@ def pack_header(h: ClipHeader) -> bytes:
     body = struct.pack(
         _HDR_FIXED,
         HEADER_MAGIC,
-        1,                              # version
+        _HDR_VERSION,
+        h.flags,
         h.width,
         h.height,
         h.bit_depth,
@@ -112,7 +117,12 @@ def unpack_header(data: bytes) -> ClipHeader:
     fields = struct.unpack_from(_HDR_FIXED, data, 0)
     if fields[0] != HEADER_MAGIC:
         raise ValueError(f"bad header magic {fields[0]!r}")
-    i = 2  # skip magic, version
+    if fields[1] != _HDR_VERSION:
+        raise ValueError(
+            f"unsupported header version {fields[1]} (expected {_HDR_VERSION})"
+        )
+    flags = fields[2]
+    i = 3  # skip magic, version, flags
     width, height, bit_depth = fields[i], fields[i + 1], fields[i + 2]
     cfa = _read_str(fields[i + 3])
     fr_num, fr_den = fields[i + 4], fields[i + 5]
@@ -136,7 +146,7 @@ def unpack_header(data: bytes) -> ClipHeader:
         lens_id=lens_id, focal_length_35=focal, aperture=aperture,
         intrinsic_matrix=intrinsics, readout_time_ns=readout,
         ois_enabled=bool(ois), start_timecode=timecode,
-        created_at_ns=created, device_model=model,
+        created_at_ns=created, device_model=model, flags=flags,
     )
 
 

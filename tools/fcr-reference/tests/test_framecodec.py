@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from fcrref import framecodec
-from fcrref.constants import CFA_PATTERNS, MAX_VALUE
+from fcrref.constants import CFA_PATTERNS, MAX_VALUE, max_value_for
 
 
 def _frame(height=64, width=96, seed=20260819):
@@ -79,3 +79,37 @@ def test_max_value_itself_is_accepted():
     m = np.full((8, 8), MAX_VALUE, dtype=np.uint16)
     assert framecodec.estimate_frame_bits(m, "RGGB") > 0
     assert framecodec.encode_frame(m, "RGGB")
+
+
+@pytest.mark.parametrize("bit_depth", [10, 12, 14])
+@pytest.mark.parametrize("pattern", CFA_PATTERNS)
+def test_roundtrip_all_bit_depths_and_patterns(bit_depth, pattern):
+    """A mosaic with values in range for `bit_depth` round-trips exactly
+    when encoded and decoded at that declared depth."""
+    max_value = max_value_for(bit_depth)
+    rng = np.random.default_rng(20260819)
+    m = rng.integers(0, max_value + 1, size=(64, 96), dtype=np.uint16)
+    payload = framecodec.encode_frame(m, pattern, bit_depth=bit_depth)
+    decoded = framecodec.decode_frame(payload, *m.shape, pattern, bit_depth=bit_depth)
+    assert np.array_equal(decoded, m)
+
+
+def test_check_range_rejects_sample_above_declared_depth():
+    m = np.full((8, 8), 1024, dtype=np.uint16)  # 1024 > 1023, the 10-bit max
+    with pytest.raises(ValueError, match=r"\b10\b"):
+        framecodec.encode_frame(m, "RGGB", bit_depth=10)
+
+
+def test_check_range_message_names_the_declared_depth():
+    m = np.full((8, 8), 5000, dtype=np.uint16)  # exceeds 12-bit max (4095)
+    with pytest.raises(ValueError, match=r"\b12\b"):
+        framecodec.estimate_frame_bits(m, "RGGB", bit_depth=12)
+
+
+def test_10bit_valued_data_is_valid_at_default_depth_14():
+    """Values in range at a shallower depth are always in range at a
+    greater depth -- only the ceiling moves. Encoding 10-bit-valued data
+    without specifying bit_depth (default 14) must succeed."""
+    m = np.full((8, 8), max_value_for(10), dtype=np.uint16)
+    payload = framecodec.encode_frame(m, "RGGB")
+    assert np.array_equal(framecodec.decode_frame(payload, *m.shape, "RGGB"), m)

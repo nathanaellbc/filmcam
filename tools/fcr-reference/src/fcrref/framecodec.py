@@ -15,7 +15,7 @@ import struct
 import numpy as np
 
 from .bayer import PLANE_ORDER, merge_planes, split_planes
-from .constants import MAX_VALUE
+from .constants import BIT_DEPTH, max_value_for
 from .predictor import forward, inverse
 from .rice import decode_plane, encode_plane, plane_bit_length
 
@@ -38,22 +38,31 @@ def _strip_bounds(height: int, strips: int) -> list[tuple[int, int]]:
     return bounds
 
 
-def _check_range(mosaic: np.ndarray) -> None:
-    """Reject samples the Rice coder cannot represent.
+def _check_range(mosaic: np.ndarray, bit_depth: int = BIT_DEPTH) -> None:
+    """Reject samples the Rice coder cannot represent at `bit_depth`.
 
     encode_frame would fail deep inside rice.py with a per-value message;
     estimate_frame_bits would silently succeed and report a ratio for a
     bitstream that cannot physically be produced. Both call this so the
     estimator and the encoder accept exactly the same inputs.
+
+    Only an upper bound is enforced: data valued within a shallower depth
+    is always valid at a greater declared depth, since only the ceiling
+    moves. Whether the data actually matches the declared depth is a
+    container-layer concern, not this codec's.
     """
-    if mosaic.size and int(mosaic.max()) > MAX_VALUE:
+    max_value = max_value_for(bit_depth)
+    if mosaic.size and int(mosaic.max()) > max_value:
         raise ValueError(
-            f"sample {int(mosaic.max())} exceeds MAX_VALUE {MAX_VALUE}"
+            f"sample {int(mosaic.max())} exceeds max value {max_value} "
+            f"for {bit_depth}-bit depth"
         )
 
 
-def encode_frame(mosaic: np.ndarray, pattern: str, strips: int = 1) -> bytes:
-    _check_range(mosaic)
+def encode_frame(
+    mosaic: np.ndarray, pattern: str, strips: int = 1, bit_depth: int = BIT_DEPTH
+) -> bytes:
+    _check_range(mosaic, bit_depth)
     planes = split_planes(mosaic, pattern)
     plane_height = planes[PLANE_ORDER[0]].shape[0]
     bounds = _strip_bounds(plane_height, strips)
@@ -69,7 +78,22 @@ def encode_frame(mosaic: np.ndarray, pattern: str, strips: int = 1) -> bytes:
     return header + lengths + b"".join(chunks)
 
 
-def decode_frame(payload: bytes, height: int, width: int, pattern: str) -> np.ndarray:
+def decode_frame(
+    payload: bytes,
+    height: int,
+    width: int,
+    pattern: str,
+    bit_depth: int = BIT_DEPTH,
+) -> np.ndarray:
+    """Decode a payload produced by `encode_frame`.
+
+    `bit_depth` is accepted for signature symmetry with `encode_frame` and
+    for the container layer (Task 3), which threads the depth declared in
+    its header through every codec call. It has no effect on decoding
+    itself: the bitstream layout does not vary with depth (see D1 in
+    constants.py — RAW_BITS is fixed), so nothing here depends on it.
+    """
+    del bit_depth  # unused: see docstring
     plane_count, strips, _ = struct.unpack_from(_HEADER_FMT, payload, 0)
     if plane_count != 4:
         raise ValueError(f"expected 4 planes, got {plane_count}")
@@ -97,9 +121,11 @@ def decode_frame(payload: bytes, height: int, width: int, pattern: str) -> np.nd
     return merge_planes(planes, pattern)
 
 
-def estimate_frame_bits(mosaic: np.ndarray, pattern: str, strips: int = 1) -> int:
+def estimate_frame_bits(
+    mosaic: np.ndarray, pattern: str, strips: int = 1, bit_depth: int = BIT_DEPTH
+) -> int:
     """Total bitstream bits, excluding the payload header. Used by analyze."""
-    _check_range(mosaic)
+    _check_range(mosaic, bit_depth)
     planes = split_planes(mosaic, pattern)
     plane_height = planes[PLANE_ORDER[0]].shape[0]
     bounds = _strip_bounds(plane_height, strips)

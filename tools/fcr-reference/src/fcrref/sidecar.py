@@ -34,11 +34,18 @@ class MotionSample:
 class FcmWriter:
     def __init__(self, path: str) -> None:
         self._file = open(path, "wb")
+        self._header_written = False
 
     def write_header(self, sample_rate_hz: int) -> None:
         self._file.write(struct.pack(_HEADER_FMT, SIDECAR_MAGIC, 1, sample_rate_hz))
+        self._header_written = True
 
     def append(self, sample: MotionSample) -> None:
+        # Mirrors FcrWriter.append_frame. Without the guard a record
+        # written first shifts every sample by the 8-byte header on read,
+        # and read_sidecar would report a bogus magic or rate.
+        if not self._header_written:
+            raise RuntimeError("write_header must be called first")
         self._file.write(
             struct.pack(_RECORD_FMT, sample.host_time_ns, *sample.gyro, *sample.accel)
         )

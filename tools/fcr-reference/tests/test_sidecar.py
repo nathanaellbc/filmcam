@@ -72,3 +72,25 @@ def test_find_gaps_detects_a_stall():
 
 def test_find_gaps_requires_at_least_two_samples():
     assert find_gaps(_samples(1), expected_hz=200) == []
+
+
+def test_append_before_write_header_is_refused(tmp_path):
+    """FcrWriter.append_frame already guards this exact case; the
+    asymmetry was the defect. A record written ahead of the 8-byte header
+    silently shifts every sample by 8 bytes on read."""
+    w = FcmWriter(str(tmp_path / "clip.fcm"))
+    try:
+        with pytest.raises(RuntimeError):
+            w.append(_samples(1)[0])
+    finally:
+        w.close()
+
+
+def test_append_is_allowed_once_the_header_is_written(tmp_path):
+    path = tmp_path / "clip.fcm"
+    w = FcmWriter(str(path))
+    w.write_header(200)
+    w.append(_samples(1)[0])
+    w.close()
+    _rate, loaded = read_sidecar(str(path))
+    assert len(loaded) == 1

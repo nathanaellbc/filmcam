@@ -1,10 +1,17 @@
+import struct
+
 import numpy as np
 import pytest
 
 from conftest import build_header as _header
 from fcrref import repair
 from fcrref.constants import HEADER_SIZE
-from fcrref.container import FcrReader, FcrWriter
+from fcrref.container import (
+    FRAME_RECORD_FMT,
+    FRAME_RECORD_SIZE,
+    FcrReader,
+    FcrWriter,
+)
 
 
 def _write_clip(path, frame_count=6, seed=4):
@@ -76,3 +83,54 @@ def test_repair_on_header_only_file_recovers_nothing(tmp_path):
     data = path.read_bytes()[:HEADER_SIZE]
     path.write_bytes(data)
     assert repair.repair(str(path)) == 0
+
+
+def test_scan_stops_at_a_corrupt_payload_inside_a_full_length_frame(tmp_path):
+    """Reach the CRC branch, which truncation never does.
+
+    Truncation always leaves byte-identical valid data ahead of the cut, so
+    the payload-length check always fires first and the CRC gate is never
+    the deciding one. This flips a single bit *inside* an otherwise
+    complete payload, leaving the length field intact, so only the CRC can
+    catch it. That branch already shipped one bug that survived 65 tests
+    because no fixture reached it.
+    """
+    path = tmp_path / "clip.fcr"
+    frames = _write_clip(path, frame_count=6)
+    entries = repair.scan_frames(str(path))
+    assert len(entries) == len(frames)
+
+    victim = 3
+    offset, size = entries[victim]
+    data = bytearray(path.read_bytes())
+    payload_start = offset + FRAME_RECORD_SIZE
+    flip_at = payload_start + (size - FRAME_RECORD_SIZE) // 2
+    assert flip_at < offset + size  # squarely inside this frame's payload
+    data[flip_at] ^= 0x01
+    path.write_bytes(bytes(data))
+
+    # The record header, and therefore the length field, is untouched.
+    assert len(path.read_bytes()) == len(data)
+    magic, _s, _p, _e, _i, _l, payload_bytes, _crc = struct.unpack_from(
+        FRAME_RECORD_FMT, bytes(data), offset
+    )
+    assert magic == b"FRM0"
+    assert payload_bytes == size - FRAME_RECORD_SIZE
+
+    assert repair.scan_frames(str(path)) == entries[:victim]
+
+
+def test_repair_after_inner_corruption_keeps_only_the_clean_prefix(tmp_path):
+    path = tmp_path / "clip.fcr"
+    frames = _write_clip(path, frame_count=6)
+    offset, size = repair.scan_frames(str(path))[2]
+    data = bytearray(path.read_bytes())
+    data[offset + FRAME_RECORD_SIZE + 5] ^= 0xFF
+    path.write_bytes(bytes(data))
+
+    assert repair.repair(str(path)) == 2
+    reader = FcrReader(str(path))
+    assert reader.frame_count == 2
+    for i in range(2):
+        decoded, _ = reader.read_frame(i)
+        assert np.array_equal(decoded, frames[i])

@@ -3,7 +3,11 @@ name = "fcrref"
 version = "0.1.0"
 description = "Reference implementation of the .fcr container and Rice codec"
 requires-python = ">=3.11"
-dependencies = ["numpy>=1.26"]
+# Upper-bounded on purpose: the committed conformance vector hashes are
+# the deliverable, and numpy's Generator streams may legally change
+# across major releases under NEP 19. A silent stream change would
+# invalidate every source_noise-derived vector.
+dependencies = ["numpy>=1.26,<3"]
 
 [project.optional-dependencies]
 dng = ["rawpy>=0.19"]

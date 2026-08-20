@@ -37,3 +37,9 @@ venv/
 # port validates against these exact bytes, so they must be committed.
 !/tools/fcr-reference/vectors/*.fcr
 !/tools/fcr-reference/vectors/*.fcm
+
+# Sample footage shot on-device for measurement — large, not repo content.
+# Keep the reference tool's own committed vectors (negated above) intact.
+/tools/fcr-reference/sample/
+/tools/fcr-reference/*_dng/
+*.wav

@@ -52,12 +52,17 @@ Everything below follows from one table.
 
 | Mode | Frame @14-bit packed | Uncompressed @24 fps | Verdict |
 |---|---|---|---|
-| Full 48 MP open gate | 84 MB | 2.0 GB/s | **Impossible** |
+| Full 48 MP open gate | 84 MB | 2.0 GB/s | **Impossible** (see §2.2) |
 | **12 MP binned open gate** | 21 MB | **504 MB/s** | Viable **only with lossless compression** |
 | 4K crop (8.3 MP) | 14.5 MB | 350 MB/s | Viable, less stabilization margin |
 
-**Decision: 12 MP binned open gate is the primary mode.** 4K crop is a fallback if the probe
-shows 12 MP cannot hold 24 fps.
+**Decision: no mode is ruled out on bandwidth before the hardware rules it out.** See §2.5 for
+the measured rates and the mode matrix, and §2.6 for why this section no longer names a single
+primary mode.
+
+> **Retracted:** this section previously read *"12 MP binned open gate is the primary mode,
+> 4K crop is a fallback."* That decision rested on a 14-bit premise (§2.3) and a 200 MB/s
+> ceiling (§2.5) that measurement has since contradicted. Mode selection is now empirical.
 
 ### 2.2 Why 48 MP is not available
 
@@ -78,14 +83,45 @@ Five independent walls, any one of which is decisive:
 5. **Memory and storage.** An 8-frame ring buffer alone is 672 MB against ~2–3 GB usable.
    128 GB of storage holds ~2.5 minutes.
 
-### 2.3 Bit depth
+### 2.3 Bit depth — CORRECTED 2026-08-20
 
-14-bit throughout, stored packed at 7 bytes per 4 pixels (1.75 B/px).
+**This section was wrong.** It previously asserted:
 
-iOS's only Bayer pixel formats are 14-bit (`kCVPixelFormatType_14Bayer_{RGGB,BGGR,GRBG,GBRG}`).
-There is no 12-bit format to fall back to. Reducing bit depth is not a useful lever anyway:
-12-bit would save 25% of bandwidth at the cost of two stops of shadow latitude, while
-compression saves ~60% for free.
+> *"14-bit throughout … iOS's only Bayer pixel formats are 14-bit. There is no 12-bit format
+> to fall back to. Reducing bit depth is not a useful lever anyway."*
+
+Every clause of that is contradicted by footage shot on the target device.
+
+**What was measured.** Three clips captured with RAW Cam on the iPhone 15 (`iPhone15,4 back
+camera`, per the DNG's own `UniqueCameraModel` tag) are **10-bit**, confirmed from the TIFF
+tags rather than inferred:
+
+```
+BitsPerSample   10          ← genuinely 10-bit encoded, not 16-bit padded
+WhiteLevel      1023        = 2^10 − 1, exact full scale
+BlackLevel      132
+Compression     7           (lossless JPEG)
+```
+
+**The depth is being discarded, not missing.** `132 × 16 = 2112` is a typical iPhone black
+level at 14-bit, and `1023 = 16383 >> 4`. The data has the signature of 14-bit sensor output
+right-shifted by four bits. srRAW advertises 14-bit CinemaDNG on iPhone, which corroborates
+that the sensor path can deliver more than the capture app chose to write.
+
+**Bit depth is the most useful lever available, not a negligible one.** §2.5 shows it moving
+the required data rate by more than a factor of two. The old claim that "compression saves
+~60% for free" was itself an unmeasured assumption; the real figure ranges from 1.9:1 to
+2.9:1 depending on lens, and it is *lower* at greater depth because the added low-order bits
+are photon noise.
+
+**Open question the probe must answer:** what depths the device vends through the capture
+path we use — 10, 12 and/or 14 bit. Added to §4.1.
+
+**Storage note.** 14-bit packs at 7 bytes per 4 pixels (1.75 B/px); 12-bit at 3 bytes per 2
+pixels (1.5 B/px); 10-bit at 5 bytes per 4 pixels (1.25 B/px). The container header already
+carries `bitDepth`, so the format needs no change to support all three — but the codec
+currently derives `MAX_VALUE` and `RAW_BITS` from a module-level `BIT_DEPTH = 14` constant
+and must be reworked to read them per clip. See §2.6.
 
 ### 2.4 Other device facts that shape the design
 
@@ -96,6 +132,81 @@ compression saves ~60% for free.
 | No Apple-sanctioned ProRes encode | Probe must determine whether `VTCompressionSession` vends ProRes anyway. |
 | No hardware HEVC 4:4:4 on A16 | 4:4:4 output is a desktop-export path, not an on-device one. |
 | Thin thermal envelope | Degradation ladder is a core feature, not a safety net. |
+
+### 2.5 Measured compression, and the mode matrix
+
+Measured 2026-08-20 with `tools/fcr-reference/analyze` against RAW Cam footage shot on the
+target iPhone 15. Three frames per clip; per-frame variance under 0.5%, so the aggregates are
+stable.
+
+**Measured — these are facts:**
+
+| Clip | Lens | Mode | Depth | Ratio | Rate @24 fps | 128 GB runway |
+|---|---|---|---|---|---|---|
+| `142535` | Main | Open gate 4032×3024 | 10-bit | **2.936:1** | **125 MB/s** | ~15 min |
+| `135923` | Main | 4K 3840×2160 | 10-bit | **2.675:1** | **93 MB/s** | ~20 min |
+| `141342` | **Ultrawide** | Open gate 4032×3024 | 10-bit | **1.933:1** | **189 MB/s** | ~10 min |
+
+**Extrapolated — these are estimates, main lens:**
+
+| Depth | Resolution | Ratio | Rate @24 fps | 128 GB runway |
+|---|---|---|---|---|
+| 12-bit | Open gate | ~2.22:1 | ~198 MB/s | ~9 min |
+| 12-bit | 4K | ~2.09:1 | ~143 MB/s | ~13 min |
+| 14-bit | Open gate | ~1.89:1 | ~271 MB/s | ~7 min |
+| 14-bit | 4K | ~1.81:1 | ~192 MB/s | ~10 min |
+
+Extrapolation method: each added bit of depth adds ≈1 bit to the coded cost per sample,
+because the added low-order bits are photon noise and compress barely at all. If the sensor's
+read noise is lower than that assumption, deeper modes will do **better** than shown.
+
+**Three findings worth carrying forward:**
+
+1. **The lens costs more than the mode.** Ultrawide compresses 34% worse than main at
+   identical settings (1.93 vs 2.94) — smaller photosites, fewer photons, more shot noise,
+   and noise is what resists compression. Multiply any row by ~1.5 for ultrawide.
+2. **Green compresses worst.** Per-plane ratios run R 3.16 / G1 2.75 / G2 2.75 / B 3.14.
+   Green carries twice the samples and most of the luminance detail.
+3. **Depth and area trade against each other along one budget line.** 14-bit 4K (~192 MB/s)
+   and 10-bit open gate (125 MB/s) sit close enough to be alternative points on the same
+   budget — which is what makes a user-facing mode choice meaningful rather than arbitrary.
+
+### 2.6 No assumed ceiling — modes are disqualified by hardware, not by estimate
+
+**The 200 MB/s figure that appears throughout earlier drafts of this spec is an inference, not
+a measurement.** It was derived from RAW Cam's published ~12 GB/min marketing figure — i.e.
+"what a shipping app on this class of hardware apparently sustains." It is not a limit anyone
+has measured on this device, and it must not be treated as one.
+
+The genuine sustained-write ceiling of the iPhone 15 is **unknown**. So is the compression
+throughput of the A16, which at 12 MP × 24 fps means Rice-coding **292 megapixels per second**
+— plausibly the binding constraint well before storage is. So is the thermal envelope under
+sustained writes. All three are Phase 0 probe items (§4.1).
+
+**Therefore: ship every mode, and let the device disqualify them.**
+
+- The mode picker offers the full matrix — {10, 12, 14}-bit × {open gate, 4K} × available
+  lenses — without any mode pre-excluded on estimated bandwidth.
+- Each mode carries a **qualification state** on this specific device: `unverified`,
+  `verified`, or `failed`, with the observed sustained rate and the thermal knee where known.
+- A mode is marked `failed` only when the hardware actually fails it — dropped frames, writer
+  backpressure that exhausts the pool, or a thermal stop — and the failure is recorded with
+  the numbers that caused it.
+- **Qualification runs as a real capture, not a synthetic benchmark**, because the thing being
+  measured is the whole pipeline under thermal load, which no synthetic test reproduces.
+
+This is the same principle §4 already applies to formats: probe the hardware, adapt at
+runtime, never assume. Applying it to bandwidth as well removes the last place this design
+guesses at a number it could measure.
+
+**It also produces better information than an assumption ever could.** A mode that fails tells
+you *where* the ceiling is. An estimate that excludes a mode tells you nothing, and may
+exclude a mode that would have worked.
+
+**UI consequence.** The mode picker shows qualification state per mode on this phone — which
+is a direct expression of §7's "never surprise me" premise. An operator should be able to see
+that 14-bit open gate has never been verified on their device *before* the shoot, not discover
+it when frames start dropping.
 
 ---
 
@@ -185,6 +296,9 @@ logic, two front-ends: no duplication, no diagnostic code shipped.
 | **Rolling-shutter readout time** | Per-format sensor readout duration (needed by Appendix A) |
 | **Camera intrinsics availability** | Whether `AVCameraCalibrationData` is vended on this device/format |
 | **Black/white level metadata availability** | Whether per-frame sensor level attachments are present on RAW buffers (see §6.1) |
+| **Which bit depths the capture path vends** | 10 / 12 / 14 bit. RAW Cam writes 10-bit on this device with the signature of 14-bit right-shifted by 4 (§2.3) — determine whether the depth is the app's choice or the path's ceiling |
+| **Sustained write rate, and where it degrades** | The 200 MB/s figure in earlier drafts was an inference from a competitor's marketing, never a measurement (§2.6). Measure the real sustained rate, warm and cold |
+| **Rice-coding throughput on the A16** | 12 MP × 24 fps is 292 megapixels/s of entropy coding. This may bind before storage does — measure it, because §2.6's mode qualification depends on knowing which constraint is active |
 | Sustained write throughput | Write 500 MB, report actual MB/s and variance |
 | Thermal behaviour | 60 s capture soak, sample `thermalState` and frame delivery, report the knee |
 
@@ -276,33 +390,31 @@ LZ-family compression is useless here — sensor noise yields ~1.1:1. A predicto
 
 Expected ratio 2.2–2.6:1 on typical footage, consistent with RAW Cam's published ~12 GB/min.
 
-> ### ⚠️ Provisional measurement, 2026-08-19 — the assumption above is NOT yet met
+> ### ✅ RESOLVED 2026-08-20 — measured on real footage. See §2.5.
 >
-> The Stage W reference implementation (`tools/fcr-reference`) now exists and has been
-> measured. On **synthetic** photon-noise-dominated frames it achieves:
+> The 2.2–2.6:1 estimate above was inferred from RAW Cam's published bitrate. It has now
+> been measured directly on the target device: **2.936:1** (main lens, open gate, 10-bit),
+> **2.675:1** (main, 4K, 10-bit), **1.933:1** (ultrawide, open gate, 10-bit). Full matrix
+> and method in §2.5.
 >
-> | Fixture | Ratio | Implied rate @24 fps |
-> |---|---|---|
-> | 512×512 photon-noise proxy | **1.712:1** | — |
-> | Full 4032×3024 synthetic frame | **1.763:1** | ~294 MB/s |
+> **The prediction held, but for a reason worth recording.** An earlier synthetic
+> measurement gave 1.712:1 and 1.763:1 — below the 2.0:1 floor — and the decision at the
+> time was **not** to revise the capture mode, on the argument that uniform photon noise
+> across an entire frame is strictly harder to compress than real footage dominated by
+> smooth regions. Real footage came in at 2.94:1. Had the mode been revised on the
+> synthetic number, the design would have been downgraded for nothing.
 >
-> Both are **below the 2.0:1 floor** this design depends on. At 1.76:1, 12 MP open gate
-> needs ~294 MB/s sustained rather than the ~200 MB/s assumed in §2.1.
+> **The synthetic figure was not wrong, though — it was measuring a different thing.** The
+> real footage is 10-bit; the synthetic was 14-bit. Extrapolating the real 10-bit result
+> back to 14-bit gives ~1.89:1, which sits right beside the synthetic 1.71:1. The two
+> agree once depth is accounted for. **Most of the favourable real-world number is the
+> 10-bit, not the realness** — see the corrected §2.3.
 >
-> **This does not yet invalidate §2.1**, and the primary mode has deliberately not been
-> changed, because the fixture is uniform photon noise across the entire frame. Real
-> footage is dominated by smooth regions — sky, walls, skin — whose residuals are far
-> smaller, and real ratios are normally better. Revising the capture mode on a
-> pessimistic synthetic would be acting on the wrong number.
->
-> **The gate remains a measurement on real iPhone 15 Bayer data** (Stage W, Task 7,
-> Step 7), which has not run because no footage exists yet. To close it: shoot ~10 s in
-> RAW Cam on the target device, export the DNGs, and run
-> `python -m fcrref.analyze --input "path/*.dng"`. `rawpy` is confirmed working on
-> Python 3.13, so that path is ready.
->
-> **If real footage also lands below 2.0:1**, §2.1's primary mode must change before
-> Stage M0 begins. The fallbacks are named below: 4K crop, or 18 fps.
+> **Consequence for this section's target:** the "2.2–2.6:1" figure is retained only as
+> the historical inference it was. Compression ratio is not a design target — it is an
+> output that varies with depth, lens and content, spanning 1.93:1 to 2.94:1 across
+> measured clips alone. The quantity that matters is the sustained byte rate, and per
+> §2.6 no mode is excluded on an estimate of it.
 
 **Fallback if throughput targets are missed:** drop to 4K crop (350 MB/s uncompressed) or
 reduce to 18 fps. Both are preferable to dropping frames.

@@ -148,17 +148,28 @@ def _report(paths: list[str], loader, pattern_override: str | None) -> int:
         return 1
 
     ratio = total_raw / total_coded
-    mb_per_s_24fps = (total_coded / len(paths)) / 8 / 1e6 * 24
+    bytes_per_frame = (total_coded / len(paths)) / 8
+    mb_per_s_24fps = bytes_per_frame / 1e6 * 24
+    gb_per_min = mb_per_s_24fps * 60 / 1000
+
     print("\n" + "=" * 60)
     print(f"frames analysed        {len(paths)}")
     print(f"aggregate ratio        {ratio:.3f}:1")
-    print(f"implied rate @24fps    {mb_per_s_24fps:.1f} MB/s")
-    print(f"spec target            2.2-2.6:1")
-    if ratio < 2.0:
-        print("\nVERDICT: BELOW 2.0:1 — spec 2.1 primary mode does not fit.")
-        print("The 12 MP open gate mode must be revisited.")
-    else:
-        print("\nVERDICT: meets the floor the design depends on.")
+    print(f"bytes per frame        {bytes_per_frame / 1e6:.2f} MB")
+    print(f"sustained rate @24fps  {mb_per_s_24fps:.1f} MB/s")
+    print(f"storage                {gb_per_min:.2f} GB/min")
+    for label, usable_gb in (("128 GB device", 110), ("256 GB device", 230)):
+        print(f"  runway, {label:14s} {usable_gb / gb_per_min:.1f} min")
+
+    # Deliberately NOT a pass/fail verdict. Compression ratio is an output, not a
+    # target: it varies with bit depth, lens and content, and a fixed ratio gate is
+    # meaningless across depths (10-bit data at 1.9:1 costs fewer bytes than 14-bit
+    # at 2.2:1). The device's sustained write rate has never been measured — see
+    # spec 2.6 — so no mode is disqualified here. Modes are disqualified by the
+    # hardware failing them, not by this tool guessing.
+    print("\nNo verdict is issued: the device's sustained write ceiling is unmeasured")
+    print("(spec 2.6). Compare the rate above against a measured ceiling, not an")
+    print("assumed one. For reference, RAW Cam's published ~12 GB/min is ~200 MB/s.")
     return 0
 
 

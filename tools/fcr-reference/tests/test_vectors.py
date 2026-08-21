@@ -243,6 +243,37 @@ def test_manifest_notes_raw_bits_is_fixed_across_depths():
     assert constants["supported_bit_depths"] == [10, 12, 14]
 
 
+def test_manifest_records_container_version_2_and_audio_constants(tmp_path):
+    """The audio-embedding constants the Swift port needs, pinned."""
+    constants = vectors.generate(str(tmp_path))["constants"]
+    assert constants["container_version"] == 2
+    assert constants["audio_magic"] == "AUD0"
+    assert constants["sample_format_s16le"] == 0
+    assert constants["sample_format_f32le"] == 1
+
+
+def test_vectors_include_an_interleaved_audio_clip(tmp_path):
+    """The payoff: a v2 clip carrying audio the port can validate against."""
+    names = {e["name"] for e in vectors.generate(str(tmp_path))["artifacts"]}
+    assert "clip_audio.fcr" in names
+    assert "audio_tone.s16" in names  # the source PCM, committed separately
+
+
+def test_audio_clip_vector_roundtrips_frames_and_audio(tmp_path):
+    """Read the v2 vector back: frames and audio must equal their sources."""
+    vectors.generate(str(tmp_path))
+    reader = FcrReader(str(tmp_path / "clip_audio.fcr"))
+    assert reader.header.version == 2
+    assert reader.frame_count == 3
+    assert reader.audio_count == 2
+    height, width = vectors._GEOMETRY
+    want_pcm = np.frombuffer(
+        (tmp_path / "audio_tone.s16").read_bytes(), dtype="<i2"
+    ).tobytes()
+    combined = b"".join(reader.read_audio(i)[1] for i in range(reader.audio_count))
+    assert combined == want_pcm
+
+
 def test_manifest_covers_ten_and_twelve_bit_artifacts(tmp_path):
     """The Swift port gets acceptance criteria at every depth, not just 14."""
     manifest = vectors.generate(str(tmp_path))

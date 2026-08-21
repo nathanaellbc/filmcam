@@ -1,6 +1,12 @@
 {
   "artifacts": [
     {
+      "bytes": 192000,
+      "name": "audio_tone.s16",
+      "sha256": "644e7e93936087082ac4351b707febce6a5129e99ec8c4454710bc6f4a1ac99a",
+      "source": "vectors._audio_tone(): 1s stereo s16le at 48000 Hz, 440 Hz left / 880 Hz right, integer math, little-endian, interleaved LRLR"
+    },
+    {
       "bytes": 21355,
       "name": "clip_2frame.fcr",
       "sha256": "2c8380f6afbd3f1b65f2d9aa5ddfeec01d212d0c316a6353ee9a2b698ed5c9ea",
@@ -17,6 +23,12 @@
       "name": "clip_2frame_d12.fcr",
       "sha256": "070dd00d1087bb26e938025f9eb1e5425e8012882b59cf18c5f3d6fe8f157a7b",
       "source": "container.FcrWriter over the reference header at 12-bit then source_noise_d12 (sequence 0) and source_hramp_d12 (sequence 1), pts step 41666667 ns, exposure 20833333 ns, iso 400, lens_position 0.5, strips=1, then finalize()"
+    },
+    {
+      "bytes": 215215,
+      "name": "clip_audio.fcr",
+      "sha256": "99aa42cdb6fd2d7ca48845b70a9043d287e1197d98e840f7a27e60dd8fd7be00",
+      "source": "container.FcrWriter over the reference header at version 2, interleaving frames source_noise/source_zone/source_hramp (sequences 0-2, pts step 41666667 ns) with two AUD0 chunks of audio_tone.s16 (24000 frames each, pts 0 and 500000000 ns, 48000 Hz stereo s16le), then finalize()"
     },
     {
       "bytes": 4096,
@@ -398,8 +410,11 @@
     }
   ],
   "constants": {
+    "audio_chunk_ns": 500000000,
+    "audio_magic": "AUD0",
     "bit_depth": 14,
     "block_size": 512,
+    "container_version": 2,
     "k_bits": 4,
     "k_max": 15,
     "lut_size": 17,
@@ -412,6 +427,8 @@
     ],
     "raw_bits": 15,
     "rice_limit": 24,
+    "sample_format_f32le": 1,
+    "sample_format_s16le": 0,
     "supported_bit_depths": [
       10,
       12,

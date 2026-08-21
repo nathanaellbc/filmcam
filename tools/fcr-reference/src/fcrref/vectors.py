@@ -18,12 +18,15 @@ import argparse
 import hashlib
 import json
 import os
+import struct
 
 import numpy as np
 
 from . import patterns
 from .bayer import PLANE_ORDER, split_planes
 from .constants import (
+    AUDIO_CHUNK_NS,
+    AUDIO_MAGIC,
     BIT_DEPTH,
     BLOCK_SIZE,
     CFA_PATTERNS,
@@ -32,6 +35,8 @@ from .constants import (
     MAX_VALUE,
     RAW_BITS,
     RICE_LIMIT,
+    SAMPLE_FORMAT_F32LE,
+    SAMPLE_FORMAT_S16LE,
     max_value_for,
 )
 from .container import ClipHeader, FcrWriter, pack_header
@@ -61,6 +66,12 @@ _FRAME_PTS_STEP_NS = 41_666_667
 _FRAME_EXPOSURE_NS = 20_833_333
 _FRAME_ISO = 400
 _FRAME_LENS_POSITION = 0.5
+
+# Audio vector constants. Two 0.5 s chunks at 48 kHz stereo 16-bit,
+# matching the interleave granularity in constants.AUDIO_CHUNK_NS.
+_AUDIO_RATE_HZ = 48_000
+_AUDIO_SECONDS = 1
+_AUDIO_CHUNK_FRAMES = _AUDIO_RATE_HZ // 2  # 0.5 s of frames per AUD0 record
 
 
 def _reference_header(bit_depth: int = BIT_DEPTH, version: int = 1) -> ClipHeader:
@@ -114,6 +125,27 @@ def _rgb_proxy(mosaic: np.ndarray) -> np.ndarray:
         axis=-1,
     )
     return stacked / MAX_VALUE
+
+
+def _audio_tone() -> bytes:
+    """A deterministic stereo 16-bit PCM tone for the v2 audio vector.
+
+    A fixed 440/880 Hz dual-tone at 48 kHz, generated from integer math
+    only (no numpy float timing drift), so the bytes are identical on any
+    machine. Committed both as source PCM and inside clip_audio.fcr, so the
+    Swift port can validate its audio path against a known signal.
+    """
+    import math
+
+    rate = _AUDIO_RATE_HZ
+    frames = rate * _AUDIO_SECONDS
+    out = bytearray()
+    for n in range(frames):
+        t = n / rate
+        left = int(8191.5 * math.sin(2.0 * math.pi * 440.0 * t))
+        right = int(8191.5 * math.sin(2.0 * math.pi * 880.0 * t))
+        out += struct.pack("<hh", left, right)
+    return bytes(out)
 
 
 def _motion_samples() -> list[MotionSample]:
@@ -408,6 +440,51 @@ def generate(out_dir: str) -> dict:
             "strips=1, then finalize()",
         )
 
+    # 8. Embedded audio (container version 2). A deterministic stereo tone,
+    #    committed both as raw source PCM and inside a v2 clip interleaved
+    #    between frame records, so the Swift port validates its audio path
+    #    against known bytes on a known timeline.
+    tone = _audio_tone()
+    c.write(
+        "audio_tone.s16",
+        tone,
+        f"vectors._audio_tone(): {_AUDIO_SECONDS}s stereo s16le at "
+        f"{_AUDIO_RATE_HZ} Hz, 440 Hz left / 880 Hz right, integer math, "
+        "little-endian, interleaved LRLR",
+    )
+    chunk_bytes = _AUDIO_CHUNK_FRAMES * 2 * 2  # frames x 2 ch x 2 B (s16le)
+    audio_clip = "clip_audio.fcr"
+    writer = FcrWriter(c.path(audio_clip))
+    writer.write_header(_reference_header(version=2))
+    for i, key in enumerate(("noise", "zone", "hramp")):
+        writer.append_frame(
+            sources[key],
+            sequence=i,
+            pts_ns=i * _FRAME_PTS_STEP_NS,
+            exposure_ns=_FRAME_EXPOSURE_NS,
+            iso=_FRAME_ISO,
+            lens_position=_FRAME_LENS_POSITION,
+        )
+        if i < 2:
+            chunk = tone[i * chunk_bytes:(i + 1) * chunk_bytes]
+            writer.append_audio(
+                chunk,
+                pts_ns=i * AUDIO_CHUNK_NS,
+                sample_rate_hz=_AUDIO_RATE_HZ,
+                channel_count=2,
+                sample_format=SAMPLE_FORMAT_S16LE,
+            )
+    writer.finalize()
+    c.record(
+        audio_clip,
+        "container.FcrWriter over the reference header at version 2, "
+        "interleaving frames source_noise/source_zone/source_hramp "
+        f"(sequences 0-2, pts step {_FRAME_PTS_STEP_NS} ns) with two AUD0 "
+        f"chunks of audio_tone.s16 ({_AUDIO_CHUNK_FRAMES} frames each, pts "
+        f"0 and {AUDIO_CHUNK_NS} ns, {_AUDIO_RATE_HZ} Hz stereo s16le), "
+        "then finalize()",
+    )
+
     manifest = {
         "version": 1,
         "geometry": {"height": height, "width": width},
@@ -427,6 +504,13 @@ def generate(out_dir: str) -> dict:
             "max_value": MAX_VALUE,
             "plane_order": list(PLANE_ORDER),
             "lut_size": _LUT_SIZE,
+            # Embedded audio (container version 2). The port implements
+            # against the AUD0 record layout and the parallel audio index.
+            "container_version": 2,
+            "audio_magic": AUDIO_MAGIC.decode("ascii"),
+            "sample_format_s16le": SAMPLE_FORMAT_S16LE,
+            "sample_format_f32le": SAMPLE_FORMAT_F32LE,
+            "audio_chunk_ns": AUDIO_CHUNK_NS,
         },
         "artifacts": sorted(c.entries, key=lambda a: a["name"]),
     }

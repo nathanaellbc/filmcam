@@ -134,3 +134,31 @@ def test_repair_after_inner_corruption_keeps_only_the_clean_prefix(tmp_path):
     for i in range(2):
         decoded, _ = reader.read_frame(i)
         assert np.array_equal(decoded, frames[i])
+
+
+def test_repair_recovers_a_truncated_ten_bit_clip(tmp_path):
+    """The repair scan is depth-agnostic: a crashed 10-bit take loses
+    exactly the in-flight frame, same as a 14-bit one."""
+    from conftest import build_frame as _frame
+
+    h = _header(width=32, height=24, bit_depth=10)
+    frames = [_frame(h, seed=i) for i in range(6)]
+    path = tmp_path / "clip10.fcr"
+    w = FcrWriter(str(path))
+    w.write_header(h)
+    for i, m in enumerate(frames):
+        w.append_frame(m, i, i * 41_666_667, 20833333, 400, 0.5)
+    w.finalize()
+
+    full = bytearray(path.read_bytes())
+    cut = HEADER_SIZE + (len(full) - HEADER_SIZE) * 3 // 4
+    path.write_bytes(bytes(full[:cut]))
+
+    recovered = repair.repair(str(path))
+    assert 0 < recovered < len(frames)
+
+    r = FcrReader(str(path))
+    assert r.header.bit_depth == 10
+    for i in range(recovered):
+        decoded, _ = r.read_frame(i)
+        assert np.array_equal(decoded, frames[i])

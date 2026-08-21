@@ -179,7 +179,10 @@ class FcrWriter:
                      strips: int = 1) -> None:
         if self._header is None:
             raise RuntimeError("write_header must be called first")
-        payload = encode_frame(mosaic, self._header.cfa_pattern, strips)
+        payload = encode_frame(
+            mosaic, self._header.cfa_pattern, strips,
+            bit_depth=self._header.bit_depth,
+        )
         meta = FrameMeta(sequence, pts_ns, exposure_ns, iso, lens_position)
         record = pack_frame(payload, meta)
         offset = self._file.tell()
@@ -233,7 +236,8 @@ class FcrReader:
         if (zlib.crc32(payload) & 0xFFFFFFFF) != crc:
             raise ValueError(f"CRC mismatch on frame {index}")
         mosaic = decode_frame(
-            payload, self.header.height, self.header.width, self.header.cfa_pattern
+            payload, self.header.height, self.header.width,
+            self.header.cfa_pattern, bit_depth=self.header.bit_depth,
         )
         meta = FrameMeta(sequence, pts_ns, exposure_ns, iso, lens_position)
         return mosaic, meta

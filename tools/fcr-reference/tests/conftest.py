@@ -4,17 +4,24 @@ import pytest
 from fcrref.container import ClipHeader
 
 
-def build_header(width: int = 64, height: int = 48) -> ClipHeader:
-    """A valid header. All float fields are float32-exact on purpose."""
+def build_header(
+    width: int = 64, height: int = 48, bit_depth: int = 14
+) -> ClipHeader:
+    """A valid header. All float fields are float32-exact on purpose.
+
+    `white_level` follows the declared depth so the header is self-
+    consistent at any depth.
+    """
+    white = (1 << bit_depth) - 1
     return ClipHeader(
         width=width,
         height=height,
-        bit_depth=14,
+        bit_depth=bit_depth,
         cfa_pattern="RGGB",
         frame_rate_num=24000,
         frame_rate_den=1000,
         black_level=(64, 64, 64, 64),
-        white_level=(16383, 16383, 16383, 16383),
+        white_level=(white, white, white, white),
         color_matrix1=tuple(float(i) for i in range(9)),
         color_matrix2=tuple(float(i) for i in range(100, 109)),
         as_shot_neutral=(0.5, 1.0, 0.75),
@@ -31,9 +38,13 @@ def build_header(width: int = 64, height: int = 48) -> ClipHeader:
 
 
 def build_frame(header: ClipHeader, seed: int = 1) -> np.ndarray:
+    """A random frame whose samples respect the header's declared depth."""
     rng = np.random.default_rng(seed)
     return rng.integers(
-        0, 16384, size=(header.height, header.width), dtype=np.uint16
+        0,
+        1 << header.bit_depth,
+        size=(header.height, header.width),
+        dtype=np.uint16,
     )
 
 

@@ -137,3 +137,39 @@ def test_header_roundtrip_survives_a_wholly_distinct_header():
     assert back == h
     for f in dataclasses.fields(h):
         assert getattr(back, f.name) == getattr(h, f.name), f.name
+
+
+def test_ten_bit_clip_roundtrips_exactly(tmp_path):
+    """A 10-bit clip of several frames writes and reads back with mosaics
+    and metadata identical — the vertical slice of Task 3."""
+    h = _header(bit_depth=10)
+    frames = [_frame(h, seed=i) for i in range(4)]
+    path = tmp_path / "clip10.fcr"
+    w = FcrWriter(str(path))
+    w.write_header(h)
+    for i, m in enumerate(frames):
+        w.append_frame(m, sequence=i, pts_ns=i * 41_666_667,
+                       exposure_ns=20833333, iso=800, lens_position=0.25)
+    w.finalize()
+
+    r = FcrReader(str(path))
+    assert r.header.bit_depth == 10
+    assert r.frame_count == len(frames)
+    for i, expected in enumerate(frames):
+        decoded, meta = r.read_frame(i)
+        assert np.array_equal(decoded, expected)
+        assert meta.sequence == i
+        assert meta.iso == 800
+
+
+def test_append_frame_rejects_samples_above_the_declared_depth(tmp_path):
+    """A clip that declares 10-bit must not silently accept 14-bit data."""
+    h = _header(bit_depth=10)
+    m = _frame(h)
+    m[0, 0] = 4000  # above the 10-bit ceiling of 1023
+    path = tmp_path / "clip.fcr"
+    w = FcrWriter(str(path))
+    w.write_header(h)
+    with pytest.raises(ValueError, match="exceeds max value"):
+        w.append_frame(m, sequence=0, pts_ns=0, exposure_ns=1, iso=100,
+                       lens_position=0.0)

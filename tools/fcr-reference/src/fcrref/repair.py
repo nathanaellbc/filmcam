@@ -46,8 +46,14 @@ def scan_frames(path: str) -> list[tuple[int, int]]:
 def repair(path: str) -> int:
     """Truncate any partial tail, append a fresh index and trailer.
 
-    Returns the number of frames recovered.
+    Returns the number of frames recovered. The index layout matches the
+    file's declared container version: version 2 carries a parallel audio
+    table after the frame table (empty here until the scan is record-type
+    aware), version 1 ends at the frame table.
     """
+    with open(path, "rb") as fh:
+        version = unpack_header(fh.read()).version
+
     entries = scan_frames(path)
     end_of_frames = entries[-1][0] + entries[-1][1] if entries else HEADER_SIZE
 
@@ -57,6 +63,8 @@ def repair(path: str) -> int:
         fh.write(struct.pack("<I", len(entries)))
         for offset, size in entries:
             fh.write(struct.pack("<QI", offset, size))
+        if version >= 2:
+            fh.write(struct.pack("<I", 0))  # audio table: no records yet
         fh.write(TRAILER_MAGIC)
         fh.write(struct.pack("<Q", end_of_frames))
 

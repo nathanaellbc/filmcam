@@ -104,16 +104,28 @@ def test_reader_detects_crc_corruption(tmp_path):
 
 
 def test_header_carries_flags_at_the_documented_wire_offset():
-    """Spec 5.3: the header begins magic, version, flags."""
+    """Spec 5.3: the header begins magic, version, flags. New writes are v2."""
     h = dataclasses.replace(_header(), flags=0xDEADBEEF)
     packed = pack_header(h)
-    assert struct.unpack_from("<4sHI", packed, 0) == (HEADER_MAGIC, 1, 0xDEADBEEF)
+    assert struct.unpack_from("<4sHI", packed, 0) == (HEADER_MAGIC, 2, 0xDEADBEEF)
     assert unpack_header(packed).flags == 0xDEADBEEF
+
+
+def test_unpack_accepts_version_1_for_backward_compatibility():
+    """A v1 header (no audio index) must still read, so the 66 committed
+    v1 vectors remain loadable."""
+    h = _header()
+    data = bytearray(pack_header(h))
+    struct.pack_into("<H", data, 4, 1)  # stamp version 1 on the wire
+    back = unpack_header(bytes(data))
+    assert back.version == 1
+    # Every field except the version stamp matches the original header.
+    assert back == dataclasses.replace(h, version=1)
 
 
 def test_unpack_rejects_a_future_version():
     data = bytearray(pack_header(_header()))
-    struct.pack_into("<H", data, 4, 2)
+    struct.pack_into("<H", data, 4, 3)
     with pytest.raises(ValueError, match="version"):
         unpack_header(bytes(data))
 
@@ -173,3 +185,47 @@ def test_append_frame_rejects_samples_above_the_declared_depth(tmp_path):
     with pytest.raises(ValueError, match="exceeds max value"):
         w.append_frame(m, sequence=0, pts_ns=0, exposure_ns=1, iso=100,
                        lens_position=0.0)
+
+
+# --- Container version 2: parallel audio index ----------------------------
+
+
+def test_new_clips_are_written_at_version_2(tmp_path):
+    h = _header()
+    path = tmp_path / "clip.fcr"
+    w = FcrWriter(str(path))
+    w.write_header(h)
+    w.append_frame(_frame(h), 0, 0, 1, 100, 0.0)
+    w.finalize()
+    assert struct.unpack_from("<H", path.read_bytes(), 4)[0] == 2
+
+
+def test_a_video_only_v2_clip_reads_with_zero_audio(tmp_path):
+    """Version 2 with no audio records: the audio index is empty, not absent."""
+    h = _header()
+    frames = [_frame(h, seed=i) for i in range(3)]
+    path = tmp_path / "clip.fcr"
+    w = FcrWriter(str(path))
+    w.write_header(h)
+    for i, m in enumerate(frames):
+        w.append_frame(m, i, i * 41_666_667, 20833333, 400, 0.5)
+    w.finalize()
+
+    r = FcrReader(str(path))
+    assert r.frame_count == 3
+    assert r.audio_count == 0
+    for i, want in enumerate(frames):
+        decoded, _ = r.read_frame(i)
+        assert np.array_equal(decoded, want)
+
+
+def test_v1_committed_clip_reads_with_zero_audio():
+    """Backward compatibility: a version-1 vector (no audio table) must
+    still load, with frame count intact and an empty audio index."""
+    import pathlib
+
+    vectors = pathlib.Path(__file__).resolve().parents[1] / "vectors"
+    r = FcrReader(str(vectors / "clip_2frame.fcr"))
+    assert r.header.bit_depth == 14
+    assert r.frame_count == 2
+    assert r.audio_count == 0

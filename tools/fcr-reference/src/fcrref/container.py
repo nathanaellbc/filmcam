@@ -16,6 +16,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .constants import (
+    AUDIO_MAGIC,
     FRAME_MAGIC,
     HEADER_MAGIC,
     HEADER_SIZE,
@@ -26,7 +27,13 @@ from .framecodec import decode_frame, encode_frame
 # Wire order: magic, version, flags, width, height, bit_depth, ...
 # `flags` is last in ClipHeader (it is defaulted) but third on the wire.
 _HDR_FIXED = "<4sHIIIB16s2I4H4I9f9f3f16sff9fQ?16sQ32s"
-_HDR_VERSION = 1
+
+# Container version. Version 2 adds the embedded-audio index (parallel
+# AUD0 record table). Version 1 files — the committed video-only vectors —
+# remain readable and simply have no audio records. Versions above 2 are
+# rejected, so a v1 reader fails a v2 file cleanly at the version gate.
+_HDR_VERSION = 2
+_SUPPORTED_VERSIONS = (1, 2)
 
 # Frame-record layout. Public (no leading underscore): Task 9's repair.py
 # imports these names from this module as a documented cross-module contract.
@@ -68,6 +75,10 @@ class ClipHeader:
     created_at_ns: int
     device_model: str
     flags: int = 0
+    # Container version on the wire. Not a constructor argument: new writes
+    # are always version 2, and readers populate this from the file so the
+    # index loader knows whether a parallel audio table is present.
+    version: int = _HDR_VERSION
 
 
 @dataclass(frozen=True)
@@ -83,7 +94,7 @@ def pack_header(h: ClipHeader) -> bytes:
     body = struct.pack(
         _HDR_FIXED,
         HEADER_MAGIC,
-        _HDR_VERSION,
+        h.version,
         h.flags,
         h.width,
         h.height,
@@ -117,10 +128,12 @@ def unpack_header(data: bytes) -> ClipHeader:
     fields = struct.unpack_from(_HDR_FIXED, data, 0)
     if fields[0] != HEADER_MAGIC:
         raise ValueError(f"bad header magic {fields[0]!r}")
-    if fields[1] != _HDR_VERSION:
+    if fields[1] not in _SUPPORTED_VERSIONS:
         raise ValueError(
-            f"unsupported header version {fields[1]} (expected {_HDR_VERSION})"
+            f"unsupported header version {fields[1]} "
+            f"(supported: {max(_SUPPORTED_VERSIONS)} and earlier)"
         )
+    version = fields[1]
     flags = fields[2]
     i = 3  # skip magic, version, flags
     width, height, bit_depth = fields[i], fields[i + 1], fields[i + 2]
@@ -147,6 +160,7 @@ def unpack_header(data: bytes) -> ClipHeader:
         intrinsic_matrix=intrinsics, readout_time_ns=readout,
         ois_enabled=bool(ois), start_timecode=timecode,
         created_at_ns=created, device_model=model, flags=flags,
+        version=version,
     )
 
 
@@ -169,6 +183,7 @@ class FcrWriter:
         self._file = open(path, "wb")
         self._header: ClipHeader | None = None
         self._index: list[tuple[int, int]] = []
+        self._audio_index: list[tuple[int, int]] = []
 
     def write_header(self, header: ClipHeader) -> None:
         self._header = header
@@ -194,6 +209,15 @@ class FcrWriter:
         self._file.write(struct.pack("<I", len(self._index)))
         for offset, size in self._index:
             self._file.write(struct.pack("<QI", offset, size))
+        # Version 2 files append the parallel audio index after the frame
+        # index (the trailer's single offset still points at the start of
+        # the whole region, which self-describes both counts). Version 1
+        # files end at the frame table — keeping the committed v1 vectors
+        # byte-identical.
+        if self._header is not None and self._header.version >= 2:
+            self._file.write(struct.pack("<I", len(self._audio_index)))
+            for offset, size in self._audio_index:
+                self._file.write(struct.pack("<QI", offset, size))
         self._file.write(TRAILER_MAGIC)
         self._file.write(struct.pack("<Q", index_offset))
         self._file.close()
@@ -205,25 +229,39 @@ class FcrReader:
         with open(path, "rb") as fh:
             self._data = fh.read()
         self.header = unpack_header(self._data)
-        self._index = self._load_index()
+        self._index, self._audio_index = self._load_index()
 
-    def _load_index(self) -> list[tuple[int, int]]:
+    def _load_index(self) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
         tail = self._data[-12:]
         if len(tail) < 12 or tail[:4] != TRAILER_MAGIC:
             raise ValueError("missing trailer; use repair.scan_frames")
         index_offset = struct.unpack("<Q", tail[4:])[0]
         count = struct.unpack_from("<I", self._data, index_offset)[0]
-        entries = []
+        frames = []
         pos = index_offset + 4
         for _ in range(count):
             offset, size = struct.unpack_from("<QI", self._data, pos)
-            entries.append((offset, size))
+            frames.append((offset, size))
             pos += 12
-        return entries
+        # Version 2 files carry a parallel audio index after the frames.
+        # Version 1 files end at the frame table, so they have no audio.
+        audio: list[tuple[int, int]] = []
+        if self.header.version >= 2:
+            acount = struct.unpack_from("<I", self._data, pos)[0]
+            pos += 4
+            for _ in range(acount):
+                offset, size = struct.unpack_from("<QI", self._data, pos)
+                audio.append((offset, size))
+                pos += 12
+        return frames, audio
 
     @property
     def frame_count(self) -> int:
         return len(self._index)
+
+    @property
+    def audio_count(self) -> int:
+        return len(self._audio_index)
 
     def read_frame(self, index: int) -> tuple[np.ndarray, FrameMeta]:
         offset, _size = self._index[index]

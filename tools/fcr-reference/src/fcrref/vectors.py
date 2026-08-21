@@ -63,7 +63,7 @@ _FRAME_ISO = 400
 _FRAME_LENS_POSITION = 0.5
 
 
-def _reference_header(bit_depth: int = BIT_DEPTH) -> ClipHeader:
+def _reference_header(bit_depth: int = BIT_DEPTH, version: int = 1) -> ClipHeader:
     """A fully-populated header with every field distinct, so a port that
     mis-orders two fields of the same type cannot match the bytes.
 
@@ -71,6 +71,10 @@ def _reference_header(bit_depth: int = BIT_DEPTH) -> ClipHeader:
     dataclass and a port can compare values rather than tolerances. The
     white level follows `bit_depth` so the header is self-consistent at
     any depth; at the default the bytes are unchanged.
+
+    `version` defaults to 1 because the committed clip vectors are version
+    1 on disk and must stay byte-identical; the v2 audio vectors (Task 5)
+    pass 2 explicitly.
     """
     height, width = _GEOMETRY
     white = max_value_for(bit_depth)
@@ -96,6 +100,7 @@ def _reference_header(bit_depth: int = BIT_DEPTH) -> ClipHeader:
         created_at_ns=1_755_561_600_000_000_000,  # fixed, never time.time()
         device_model="iPhone15,4",
         flags=0,
+        version=version,
     )
 
 

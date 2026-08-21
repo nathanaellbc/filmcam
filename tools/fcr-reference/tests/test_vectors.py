@@ -234,3 +234,86 @@ def test_committed_constants_match_the_live_constants():
     assert constants["k_max"] == K_MAX
     assert constants["max_value"] == MAX_VALUE
     assert constants["plane_order"] == list(PLANE_ORDER)
+
+
+def test_manifest_notes_raw_bits_is_fixed_across_depths():
+    """D1: the escape width must not be recomputed per depth by a port."""
+    constants = _committed_manifest()["constants"]
+    assert constants["raw_bits"] == 15
+    assert constants["supported_bit_depths"] == [10, 12, 14]
+
+
+def test_manifest_covers_ten_and_twelve_bit_artifacts(tmp_path):
+    """The Swift port gets acceptance criteria at every depth, not just 14."""
+    manifest = vectors.generate(str(tmp_path))
+    names = {e["name"] for e in manifest["artifacts"]}
+    for depth in (10, 12):
+        assert f"source_noise_d{depth}.raw16" in names
+        assert f"source_hramp_d{depth}.raw16" in names
+        assert f"clip_2frame_d{depth}.fcr" in names
+        for pattern in ("rggb", "bggr", "grbg", "gbrg"):
+            for strips in (1, 4):
+                assert f"frame_{pattern}_s{strips}_d{depth}.fcrpayload" in names
+
+
+def test_shallower_clip_vectors_round_trip_at_their_declared_depth(tmp_path):
+    """The depth travels in the header: a 10-bit clip must read back as
+    10-bit data, exactly as written."""
+    vectors.generate(str(tmp_path))
+    height, width = vectors._GEOMETRY
+    for depth in (10, 12):
+        reader = FcrReader(str(tmp_path / f"clip_2frame_d{depth}.fcr"))
+        assert reader.header.bit_depth == depth
+        assert reader.frame_count == 2
+        for i, key in enumerate(("noise", "hramp")):
+            want = np.frombuffer(
+                (tmp_path / f"source_{key}_d{depth}.raw16").read_bytes(),
+                dtype="<u2",
+            ).reshape(height, width)
+            decoded, meta = reader.read_frame(i)
+            assert np.array_equal(decoded, want)
+            assert meta.sequence == i
+            assert int(decoded.max()) < (1 << depth)
+
+
+def test_shallower_payloads_reproduce_through_the_live_decoder(tmp_path):
+    """The d10/d12 frame payloads must decode, at their own depth, to the
+    source mosaic they were encoded from."""
+    from fcrref.framecodec import decode_frame
+
+    vectors.generate(str(tmp_path))
+    height, width = vectors._GEOMETRY
+    for depth in (10, 12):
+        want = np.frombuffer(
+            (tmp_path / f"source_noise_d{depth}.raw16").read_bytes(),
+            dtype="<u2",
+        ).reshape(height, width)
+        for pattern in ("RGGB", "BGGR", "GRBG", "GBRG"):
+            payload = (
+                tmp_path / f"frame_{pattern.lower()}_s1_d{depth}.fcrpayload"
+            ).read_bytes()
+            decoded = decode_frame(
+                payload, height, width, pattern, bit_depth=depth
+            )
+            assert np.array_equal(decoded, want)
+
+
+def test_pre_existing_14_bit_artifacts_are_unchanged_by_the_new_depths():
+    """The gate for Task 6: every artifact the suite produced before the
+    d10/d12 work must still hash to the value it had then. Verified
+    against git's record of the pre-change manifest — not assumed, and
+    not a file committed into vectors/ where it would itself register as
+    an artifact."""
+    import subprocess
+
+    repo_root = pathlib.Path(__file__).resolve().parents[3]
+    old = subprocess.run(
+        ["git", "show", "HEAD~4:tools/fcr-reference/vectors/manifest.json"],
+        capture_output=True, text=True, check=True, cwd=repo_root,
+    ).stdout
+    original = {a["name"]: a["sha256"] for a in json.loads(old)["artifacts"]}
+    assert len(original) == 44
+    manifest = _committed_manifest()
+    by_name = {e["name"]: e["sha256"] for e in manifest["artifacts"]}
+    for name, sha in original.items():
+        assert by_name.get(name) == sha, f"{name} changed"

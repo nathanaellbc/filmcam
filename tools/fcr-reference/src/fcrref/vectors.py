@@ -32,6 +32,7 @@ from .constants import (
     MAX_VALUE,
     RAW_BITS,
     RICE_LIMIT,
+    max_value_for,
 )
 from .container import ClipHeader, FcrWriter, pack_header
 from .framecodec import encode_frame
@@ -46,6 +47,7 @@ _GEOMETRY = (64, 96)  # small enough to commit, large enough to span blocks
 _LUT_SIZE = 17        # not the module default of 33; the ports must match this
 _NOISE_SEED = 20260819
 _MOTION_SEED = 20260820
+_EXTRA_DEPTHS = (10, 12)  # beyond BIT_DEPTH, so the port meets every depth
 
 # Fixed clip metadata. Nothing here may be derived from the wall clock or
 # the host: the committed SHA-256 is the deliverable.
@@ -61,23 +63,26 @@ _FRAME_ISO = 400
 _FRAME_LENS_POSITION = 0.5
 
 
-def _reference_header() -> ClipHeader:
+def _reference_header(bit_depth: int = BIT_DEPTH) -> ClipHeader:
     """A fully-populated header with every field distinct, so a port that
     mis-orders two fields of the same type cannot match the bytes.
 
     Every float is float32-exact, so the header round-trips to an equal
-    dataclass and a port can compare values rather than tolerances.
+    dataclass and a port can compare values rather than tolerances. The
+    white level follows `bit_depth` so the header is self-consistent at
+    any depth; at the default the bytes are unchanged.
     """
     height, width = _GEOMETRY
+    white = max_value_for(bit_depth)
     return ClipHeader(
         width=width,
         height=height,
-        bit_depth=BIT_DEPTH,
+        bit_depth=bit_depth,
         cfa_pattern="RGGB",
         frame_rate_num=24000,
         frame_rate_den=1001,
         black_level=(64, 65, 66, 67),
-        white_level=(16383, 16382, 16381, 16380),
+        white_level=(white, white - 1, white - 2, white - 3),
         color_matrix1=tuple(float(i) / 8.0 for i in range(9)),
         color_matrix2=tuple(float(i) / 16.0 for i in range(9, 18)),
         as_shot_neutral=(0.5, 1.0, 0.75),
@@ -346,11 +351,67 @@ def generate(out_dir: str) -> dict:
             "of 33; 6 decimal places, red varies fastest, LF newlines",
         )
 
+    # 7. Shallower depths, so the port meets every depth the container
+    #    header can declare — not just the 14-bit default. RAW_BITS is
+    #    fixed at 15 across all depths (D1), so the bitstream layout here
+    #    differs from the 14-bit vectors only in the data it carries.
+    for depth in _EXTRA_DEPTHS:
+        depth_sources = {
+            "noise": patterns.shot_noise(
+                height, width, seed=_NOISE_SEED, bit_depth=depth
+            ),
+            "hramp": patterns.horizontal_ramp(height, width, bit_depth=depth),
+        }
+        for key, mosaic in depth_sources.items():
+            c.write(
+                f"source_{key}_d{depth}.raw16",
+                mosaic.astype("<u2").tobytes(),
+                f"{source_calls[key].rstrip(')')}, bit_depth={depth}) as "
+                "little-endian uint16, row-major",
+            )
+        for pattern in CFA_PATTERNS:
+            for strips in (1, 4):
+                c.write(
+                    f"frame_{pattern.lower()}_s{strips}_d{depth}.fcrpayload",
+                    encode_frame(
+                        depth_sources["noise"], pattern, strips=strips,
+                        bit_depth=depth,
+                    ),
+                    f'framecodec.encode_frame(source_noise_d{depth}, '
+                    f'"{pattern}", strips={strips}, bit_depth={depth})',
+                )
+        clip_name = f"clip_2frame_d{depth}.fcr"
+        writer = FcrWriter(c.path(clip_name))
+        writer.write_header(_reference_header(bit_depth=depth))
+        for i, key in enumerate(("noise", "hramp")):
+            writer.append_frame(
+                depth_sources[key],
+                sequence=i,
+                pts_ns=i * _FRAME_PTS_STEP_NS,
+                exposure_ns=_FRAME_EXPOSURE_NS,
+                iso=_FRAME_ISO,
+                lens_position=_FRAME_LENS_POSITION,
+            )
+        writer.finalize()
+        c.record(
+            clip_name,
+            f"container.FcrWriter over the reference header at {depth}-bit "
+            f"then source_noise_d{depth} (sequence 0) and "
+            f"source_hramp_d{depth} (sequence 1), pts step "
+            f"{_FRAME_PTS_STEP_NS} ns, exposure {_FRAME_EXPOSURE_NS} ns, "
+            f"iso {_FRAME_ISO}, lens_position {_FRAME_LENS_POSITION}, "
+            "strips=1, then finalize()",
+        )
+
     manifest = {
         "version": 1,
         "geometry": {"height": height, "width": width},
         "constants": {
             "bit_depth": BIT_DEPTH,
+            "supported_bit_depths": sorted({BIT_DEPTH, *_EXTRA_DEPTHS}),
+            # D1: raw_bits is 15 at every supported depth, not depth + 1.
+            # The Rice escape width never varies with the sample depth, so
+            # a port has exactly one escape width to implement.
             "raw_bits": RAW_BITS,
             "rice_limit": RICE_LIMIT,
             "block_size": BLOCK_SIZE,

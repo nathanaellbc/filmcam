@@ -7,6 +7,18 @@
       "source": "container.FcrWriter over the reference header then source_noise (sequence 0) and source_zone (sequence 1), pts step 41666667 ns, exposure 20833333 ns, iso 400, lens_position 0.5, strips=1, then finalize()"
     },
     {
+      "bytes": 6576,
+      "name": "clip_2frame_d10.fcr",
+      "sha256": "f9ecd31ab09c8a21a459dbeda65842bca18f60762eb3fbf6e5b091875f90cf96",
+      "source": "container.FcrWriter over the reference header at 10-bit then source_noise_d10 (sequence 0) and source_hramp_d10 (sequence 1), pts step 41666667 ns, exposure 20833333 ns, iso 400, lens_position 0.5, strips=1, then finalize()"
+    },
+    {
+      "bytes": 12514,
+      "name": "clip_2frame_d12.fcr",
+      "sha256": "070dd00d1087bb26e938025f9eb1e5425e8012882b59cf18c5f3d6fe8f157a7b",
+      "source": "container.FcrWriter over the reference header at 12-bit then source_noise_d12 (sequence 0) and source_hramp_d12 (sequence 1), pts step 41666667 ns, exposure 20833333 ns, iso 400, lens_position 0.5, strips=1, then finalize()"
+    },
+    {
       "bytes": 4096,
       "name": "clip_header.bin",
       "sha256": "85ae0c1c819962522d848c96a8c86b2f83b950b280fadca23059f2267ca85c26",
@@ -25,10 +37,34 @@
       "source": "framecodec.encode_frame(source_noise, \"BGGR\", strips=1)"
     },
     {
+      "bytes": 816,
+      "name": "frame_bggr_s1_d10.fcrpayload",
+      "sha256": "8a3d9270f7db4f30b9ca9fccd382fe5f5dd4cd661d876f30a63217b3e979ebe7",
+      "source": "framecodec.encode_frame(source_noise_d10, \"BGGR\", strips=1, bit_depth=10)"
+    },
+    {
+      "bytes": 6588,
+      "name": "frame_bggr_s1_d12.fcrpayload",
+      "sha256": "cf1c91cecf39d0b50663bdae656b0c9a64b92ccc700a417074e3c63579ac4b5e",
+      "source": "framecodec.encode_frame(source_noise_d12, \"BGGR\", strips=1, bit_depth=12)"
+    },
+    {
       "bytes": 6686,
       "name": "frame_bggr_s4.fcrpayload",
       "sha256": "d9e707adff7f84fd8b2e3133f3e5deb79e8e1f191e3acbb9aaa19ca0224d8485",
       "source": "framecodec.encode_frame(source_noise, \"BGGR\", strips=4)"
+    },
+    {
+      "bytes": 932,
+      "name": "frame_bggr_s4_d10.fcrpayload",
+      "sha256": "d04344db26db2b1c70740dfbff3120693ad57af6654de145ceb0c28ab8efa7f4",
+      "source": "framecodec.encode_frame(source_noise_d10, \"BGGR\", strips=4, bit_depth=10)"
+    },
+    {
+      "bytes": 6686,
+      "name": "frame_bggr_s4_d12.fcrpayload",
+      "sha256": "d9e707adff7f84fd8b2e3133f3e5deb79e8e1f191e3acbb9aaa19ca0224d8485",
+      "source": "framecodec.encode_frame(source_noise_d12, \"BGGR\", strips=4, bit_depth=12)"
     },
     {
       "bytes": 6588,
@@ -37,10 +73,34 @@
       "source": "framecodec.encode_frame(source_noise, \"GBRG\", strips=1)"
     },
     {
+      "bytes": 816,
+      "name": "frame_gbrg_s1_d10.fcrpayload",
+      "sha256": "8a3d9270f7db4f30b9ca9fccd382fe5f5dd4cd661d876f30a63217b3e979ebe7",
+      "source": "framecodec.encode_frame(source_noise_d10, \"GBRG\", strips=1, bit_depth=10)"
+    },
+    {
+      "bytes": 6588,
+      "name": "frame_gbrg_s1_d12.fcrpayload",
+      "sha256": "29903b7c0b46b66b1621da1a4dcb4183a55cb5c3f10f8c79d9dba1776c4e5412",
+      "source": "framecodec.encode_frame(source_noise_d12, \"GBRG\", strips=1, bit_depth=12)"
+    },
+    {
       "bytes": 6686,
       "name": "frame_gbrg_s4.fcrpayload",
       "sha256": "71d9fb9fba1168a90c1bdf194bbd5d5c73d7f1e9f33c169cb42f4f70259d8558",
       "source": "framecodec.encode_frame(source_noise, \"GBRG\", strips=4)"
+    },
+    {
+      "bytes": 932,
+      "name": "frame_gbrg_s4_d10.fcrpayload",
+      "sha256": "d04344db26db2b1c70740dfbff3120693ad57af6654de145ceb0c28ab8efa7f4",
+      "source": "framecodec.encode_frame(source_noise_d10, \"GBRG\", strips=4, bit_depth=10)"
+    },
+    {
+      "bytes": 6686,
+      "name": "frame_gbrg_s4_d12.fcrpayload",
+      "sha256": "71d9fb9fba1168a90c1bdf194bbd5d5c73d7f1e9f33c169cb42f4f70259d8558",
+      "source": "framecodec.encode_frame(source_noise_d12, \"GBRG\", strips=4, bit_depth=12)"
     },
     {
       "bytes": 6588,
@@ -49,10 +109,34 @@
       "source": "framecodec.encode_frame(source_noise, \"GRBG\", strips=1)"
     },
     {
+      "bytes": 816,
+      "name": "frame_grbg_s1_d10.fcrpayload",
+      "sha256": "8a3d9270f7db4f30b9ca9fccd382fe5f5dd4cd661d876f30a63217b3e979ebe7",
+      "source": "framecodec.encode_frame(source_noise_d10, \"GRBG\", strips=1, bit_depth=10)"
+    },
+    {
+      "bytes": 6588,
+      "name": "frame_grbg_s1_d12.fcrpayload",
+      "sha256": "3b713ffda1f59c59048ead0224ded8628dcc4b02891dc5f77a6d528df364b59a",
+      "source": "framecodec.encode_frame(source_noise_d12, \"GRBG\", strips=1, bit_depth=12)"
+    },
+    {
       "bytes": 6686,
       "name": "frame_grbg_s4.fcrpayload",
       "sha256": "4192382e984ed65ad43149eb42faddf1256acfcc6ce82169c0f2bdd7b68b4d20",
       "source": "framecodec.encode_frame(source_noise, \"GRBG\", strips=4)"
+    },
+    {
+      "bytes": 932,
+      "name": "frame_grbg_s4_d10.fcrpayload",
+      "sha256": "d04344db26db2b1c70740dfbff3120693ad57af6654de145ceb0c28ab8efa7f4",
+      "source": "framecodec.encode_frame(source_noise_d10, \"GRBG\", strips=4, bit_depth=10)"
+    },
+    {
+      "bytes": 6686,
+      "name": "frame_grbg_s4_d12.fcrpayload",
+      "sha256": "4192382e984ed65ad43149eb42faddf1256acfcc6ce82169c0f2bdd7b68b4d20",
+      "source": "framecodec.encode_frame(source_noise_d12, \"GRBG\", strips=4, bit_depth=12)"
     },
     {
       "bytes": 6588,
@@ -61,10 +145,34 @@
       "source": "framecodec.encode_frame(source_noise, \"RGGB\", strips=1)"
     },
     {
+      "bytes": 816,
+      "name": "frame_rggb_s1_d10.fcrpayload",
+      "sha256": "8a3d9270f7db4f30b9ca9fccd382fe5f5dd4cd661d876f30a63217b3e979ebe7",
+      "source": "framecodec.encode_frame(source_noise_d10, \"RGGB\", strips=1, bit_depth=10)"
+    },
+    {
+      "bytes": 6588,
+      "name": "frame_rggb_s1_d12.fcrpayload",
+      "sha256": "10288e537bd0781971d5aa06cdd91ea8704e37d594d1383c6b6d31caec494218",
+      "source": "framecodec.encode_frame(source_noise_d12, \"RGGB\", strips=1, bit_depth=12)"
+    },
+    {
       "bytes": 6686,
       "name": "frame_rggb_s4.fcrpayload",
       "sha256": "3f9543587841186717f92de010d3876a034b779ae9da8a49f1ff23a573012acb",
       "source": "framecodec.encode_frame(source_noise, \"RGGB\", strips=4)"
+    },
+    {
+      "bytes": 932,
+      "name": "frame_rggb_s4_d10.fcrpayload",
+      "sha256": "d04344db26db2b1c70740dfbff3120693ad57af6654de145ceb0c28ab8efa7f4",
+      "source": "framecodec.encode_frame(source_noise_d10, \"RGGB\", strips=4, bit_depth=10)"
+    },
+    {
+      "bytes": 6686,
+      "name": "frame_rggb_s4_d12.fcrpayload",
+      "sha256": "3f9543587841186717f92de010d3876a034b779ae9da8a49f1ff23a573012acb",
+      "source": "framecodec.encode_frame(source_noise_d12, \"RGGB\", strips=4, bit_depth=12)"
     },
     {
       "bytes": 132735,
@@ -230,6 +338,18 @@
     },
     {
       "bytes": 12288,
+      "name": "source_hramp_d10.raw16",
+      "sha256": "f1322ffc9771ec373761b4f1f3feaa6340dfdcacd5ffeabe4755112834890d2c",
+      "source": "patterns.horizontal_ramp(64, 96, bit_depth=10) as little-endian uint16, row-major"
+    },
+    {
+      "bytes": 12288,
+      "name": "source_hramp_d12.raw16",
+      "sha256": "8861a181efb35bbd965ecc4dcb564311b71185d12162e5a71720db8702a57222",
+      "source": "patterns.horizontal_ramp(64, 96, bit_depth=12) as little-endian uint16, row-major"
+    },
+    {
+      "bytes": 12288,
       "name": "source_motion_0.raw16",
       "sha256": "1e1a3cb5e06e5850bb2aed02113a6ea8e12a5f49ce867819be975c977fa429d8",
       "source": "patterns.motion_sequence(64, 96, 3, seed=20260820)[0] as little-endian uint16, row-major"
@@ -251,6 +371,18 @@
       "name": "source_noise.raw16",
       "sha256": "2e50548ed739f9e125503a1585a0b631887d7c8a94e5d06d6cad4d1c7b0b7843",
       "source": "patterns.shot_noise(64, 96, seed=20260819) as little-endian uint16, row-major"
+    },
+    {
+      "bytes": 12288,
+      "name": "source_noise_d10.raw16",
+      "sha256": "09f4fc3c86f6ef47dda0d49f11ac0aca99f5de84a0cdb3b527a1a40d40248929",
+      "source": "patterns.shot_noise(64, 96, seed=20260819, bit_depth=10) as little-endian uint16, row-major"
+    },
+    {
+      "bytes": 12288,
+      "name": "source_noise_d12.raw16",
+      "sha256": "2e50548ed739f9e125503a1585a0b631887d7c8a94e5d06d6cad4d1c7b0b7843",
+      "source": "patterns.shot_noise(64, 96, seed=20260819, bit_depth=12) as little-endian uint16, row-major"
     },
     {
       "bytes": 12288,
@@ -279,7 +411,12 @@
       "B"
     ],
     "raw_bits": 15,
-    "rice_limit": 24
+    "rice_limit": 24,
+    "supported_bit_depths": [
+      10,
+      12,
+      14
+    ]
   },
   "geometry": {
     "height": 64,

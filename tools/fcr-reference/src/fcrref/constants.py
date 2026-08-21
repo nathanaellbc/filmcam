@@ -52,3 +52,17 @@ HEADER_MAGIC = b"FCR1"
 FRAME_MAGIC = b"FRM0"
 TRAILER_MAGIC = b"FCRX"
 SIDECAR_MAGIC = b"FCM1"
+
+# Embedded audio (container version 2). Audio travels in its own AUD0
+# record with its own index, interleaved between FRM0 frame records — the
+# model MCRAW proves, adapted to .fcr's append-only, crash-safe design.
+AUDIO_MAGIC = b"AUD0"
+
+# Audio sample formats. PCM only: at 48 kHz stereo 16-bit, audio is ~192
+# KB/s against a 125-271 MB/s video budget, so compression is scope creep
+# with no payoff (plan D2). ids are normative for the Swift port.
+SAMPLE_FORMAT_S16LE = 0    # signed 16-bit little-endian, interleaved
+SAMPLE_FORMAT_F32LE = 1    # 32-bit float little-endian, interleaved
+
+# Interleave granularity (plan D6): audio is flushed in ~0.5 s chunks.
+AUDIO_CHUNK_NS = 500_000_000

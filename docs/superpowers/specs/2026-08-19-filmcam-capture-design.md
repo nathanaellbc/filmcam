@@ -123,6 +123,16 @@ carries `bitDepth`, so the format needs no change to support all three — but t
 currently derives `MAX_VALUE` and `RAW_BITS` from a module-level `BIT_DEPTH = 14` constant
 and must be reworked to read them per clip. See §2.6.
 
+> **Resolved 2026-08-20 — variable bit depth is implemented.** The reference implementation
+> (`tools/fcr-reference`) now supports **{10, 12, 14}-bit** as a per-clip property, with the
+> container header as the authority on a clip's depth. Sample depth is capped at **14-bit** —
+> the sensor's ceiling — because the Rice escape width `RAW_BITS` is deliberately fixed at 15
+> across all depths (decision D1): a 14-bit residual zigzags to at most 32766 (15 bits), so
+> every shallower depth fits with room to spare, and holding the escape width constant costs
+> only ~24 bytes per frame on escaped samples while leaving the entropy coder untouched and
+> every committed conformance vector valid. See
+> `docs/superpowers/plans/2026-08-20-variable-bit-depth.md`.
+
 ### 2.4 Other device facts that shape the design
 
 | Fact | Consequence |
@@ -186,7 +196,8 @@ sustained writes. All three are Phase 0 probe items (§4.1).
 **Therefore: ship every mode, and let the device disqualify them.**
 
 - The mode picker offers the full matrix — {10, 12, 14}-bit × {open gate, 4K} × available
-  lenses — without any mode pre-excluded on estimated bandwidth.
+  lenses — without any mode pre-excluded on estimated bandwidth. The codec and container
+  already handle all three depths (§2.3); the matrix is a runtime choice, not a rebuild.
 - Each mode carries a **qualification state** on this specific device: `unverified`,
   `verified`, or `failed`, with the observed sustained rate and the thermal knee where known.
 - A mode is marked `failed` only when the hardware actually fails it — dropped frames, writer

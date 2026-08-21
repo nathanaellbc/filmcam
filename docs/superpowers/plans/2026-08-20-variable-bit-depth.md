@@ -94,32 +94,32 @@ Swift port gaining multi-depth acceptance criteria.
 
 ### Phase 1: Foundation
 
-- [ ] **Task 1: Depth helpers in `constants.py`**
-- [ ] **Task 2: `framecodec` accepts a bit depth**
+- [x] **Task 1: Depth helpers in `constants.py`**
+- [x] **Task 2: `framecodec` accepts a bit depth**
 
 ### Checkpoint: Foundation
-- [ ] `python -m pytest` — 219 passing, no change to existing counts
-- [ ] Committed-vector hash test still green (proves no existing output moved)
+- [x] `python -m pytest` — 219 passing, no change to existing counts
+- [x] Committed-vector hash test still green (proves no existing output moved)
 
 ### Phase 2: End-to-end depth
 
-- [ ] **Task 3: `container` carries depth end-to-end** ← first real vertical slice
-- [ ] **Task 4: `analyze` estimates at the measured depth**
+- [x] **Task 3: `container` carries depth end-to-end** ← first real vertical slice
+- [x] **Task 4: `analyze` estimates at the measured depth**
 
 ### Checkpoint: End-to-end
-- [ ] A 10-bit clip writes, reads back identical, and reports a correct ratio
-- [ ] All 44 committed vectors unchanged
+- [x] A 10-bit clip writes, reads back identical, and reports a correct ratio
+- [x] All 44 committed vectors unchanged
 
 ### Phase 3: Coverage for the port
 
-- [ ] **Task 5: `patterns` generates at any depth**
-- [ ] **Task 6: conformance vectors gain 10-bit and 12-bit clips**
-- [ ] **Task 7: document supported depths**
+- [x] **Task 5: `patterns` generates at any depth**
+- [x] **Task 6: conformance vectors gain 10-bit and 12-bit clips**
+- [x] **Task 7: document supported depths**
 
 ### Checkpoint: Complete
-- [ ] Vectors regenerate byte-identically; all pre-existing 44 unchanged
-- [ ] Spec and README state the supported depths and the 14-bit ceiling
-- [ ] Ready for review
+- [x] Vectors regenerate byte-identically; all pre-existing 44 unchanged
+- [x] Spec and README state the supported depths and the 14-bit ceiling
+- [x] Ready for review
 
 ---
 

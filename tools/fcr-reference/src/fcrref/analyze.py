@@ -45,7 +45,7 @@ def analyze_frame(
     """
     pixels = int(mosaic.size)
     raw_bits = pixels * bit_depth
-    coded_bits = estimate_frame_bits(mosaic, pattern, strips)
+    coded_bits = estimate_frame_bits(mosaic, pattern, strips, bit_depth=bit_depth)
 
     per_plane: dict[str, float] = {}
     for name, plane in split_planes(mosaic, pattern).items():

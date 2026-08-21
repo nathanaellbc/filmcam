@@ -121,3 +121,12 @@ def test_report_rejects_out_of_range_samples_instead_of_reporting_a_ratio():
     m = np.full((8, 8), 40000, dtype=np.uint16)
     with pytest.raises(ValueError):
         analyze.analyze_frame(m, "RGGB")
+
+
+def test_raw_bits_honours_a_ten_bit_source():
+    """raw_bits is pixels x 10, not pixels x 14 — the baseline the coded
+    estimate is compared against must agree with the declared depth."""
+    m = np.zeros((64, 64), dtype=np.uint16)
+    stats = analyze.analyze_frame(m, "RGGB", bit_depth=10)
+    assert stats.bit_depth == 10
+    assert stats.raw_bits == 64 * 64 * 10

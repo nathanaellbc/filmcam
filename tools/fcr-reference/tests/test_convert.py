@@ -103,6 +103,93 @@ def test_convert_with_no_inputs_returns_zero(tmp_path, capsys):
     assert "no input files" in capsys.readouterr().err
 
 
+# --- convert --audio: embed a WAV as AUD0 chunks ---------------------------
+
+
+def _write_wav(path, frames, channels=2, rate=48000, sampwidth=2):
+    import wave
+
+    with wave.open(str(path), "wb") as f:
+        f.setnchannels(channels)
+        f.setsampwidth(sampwidth)
+        f.setframerate(rate)
+        f.writeframes(b"\x01\x02" * frames * channels)
+
+
+def test_convert_with_audio_embeds_aud0_chunks(tmp_path, monkeypatch):
+    """A WAV alongside the DNGs becomes interleaved AUD0 records in a v2 clip."""
+    rng = np.random.default_rng(1)
+    mosaics = [rng.integers(0, 16384, size=(48, 64), dtype=np.uint16) for _ in range(3)]
+    monkeypatch.setattr(convert, "load_dng", _fake_loader(mosaics, "RGGB", 14))
+
+    wav = tmp_path / "audio.wav"
+    _write_wav(wav, frames=48000)  # 1 s of stereo s16 at 48 kHz
+
+    out = str(tmp_path / "clip.fcr")
+    convert.convert(_paths(3), out, audio_path=str(wav), verify=False)
+
+    reader = FcrReader(out)
+    assert reader.header.version == 2
+    assert reader.frame_count == 3
+    assert reader.audio_count >= 1
+    meta, payload = reader.read_audio(0)
+    assert meta.sample_rate_hz == 48000
+    assert meta.channel_count == 2
+    assert meta.sample_format == 0  # s16le
+
+
+def test_convert_audio_is_aligned_to_frame_zero_pts(tmp_path, monkeypatch):
+    """The first audio chunk's pts is the first frame's pts (0) — the shared-
+    clock alignment decision."""
+    rng = np.random.default_rng(1)
+    mosaics = [rng.integers(0, 16384, size=(48, 64), dtype=np.uint16) for _ in range(2)]
+    monkeypatch.setattr(convert, "load_dng", _fake_loader(mosaics, "RGGB", 14))
+
+    wav = tmp_path / "audio.wav"
+    _write_wav(wav, frames=48000)
+
+    out = str(tmp_path / "clip.fcr")
+    convert.convert(_paths(2), out, audio_path=str(wav), verify=False)
+
+    reader = FcrReader(out)
+    first_audio_pts = reader.read_audio(0)[0].pts_ns
+    first_frame_pts = reader.read_frame(0)[1].pts_ns
+    assert first_audio_pts == first_frame_pts
+
+
+def test_convert_audio_roundtrips_the_source_pcm(tmp_path, monkeypatch):
+    """The embedded audio, concatenated across chunks, equals the WAV's PCM."""
+    rng = np.random.default_rng(1)
+    mosaics = [rng.integers(0, 16384, size=(48, 64), dtype=np.uint16) for _ in range(2)]
+    monkeypatch.setattr(convert, "load_dng", _fake_loader(mosaics, "RGGB", 14))
+
+    import wave
+    wav = tmp_path / "audio.wav"
+    _write_wav(wav, frames=48000)
+    with wave.open(str(wav), "rb") as f:
+        source_pcm = f.readframes(48000)
+
+    out = str(tmp_path / "clip.fcr")
+    convert.convert(_paths(2), out, audio_path=str(wav), verify=False)
+
+    reader = FcrReader(out)
+    combined = b"".join(reader.read_audio(i)[1] for i in range(reader.audio_count))
+    assert combined == source_pcm
+
+
+def test_convert_without_audio_stays_version_1(tmp_path, monkeypatch):
+    """No --audio means the clip is unchanged: version 1, zero audio chunks."""
+    rng = np.random.default_rng(1)
+    mosaics = [rng.integers(0, 16384, size=(48, 64), dtype=np.uint16) for _ in range(2)]
+    monkeypatch.setattr(convert, "load_dng", _fake_loader(mosaics, "RGGB", 14))
+
+    out = str(tmp_path / "clip.fcr")
+    convert.convert(_paths(2), out, verify=False)
+    reader = FcrReader(out)
+    assert reader.header.version == 1
+    assert reader.audio_count == 0
+
+
 def test_inspect_check_passes_a_valid_clip(tmp_path, capsys):
     from conftest import build_frame, build_header
     from fcrref.container import FcrWriter

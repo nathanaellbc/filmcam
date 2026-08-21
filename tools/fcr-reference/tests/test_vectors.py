@@ -299,16 +299,19 @@ def test_shallower_payloads_reproduce_through_the_live_decoder(tmp_path):
 
 
 def test_pre_existing_14_bit_artifacts_are_unchanged_by_the_new_depths():
-    """The gate for Task 6: every artifact the suite produced before the
-    d10/d12 work must still hash to the value it had then. Verified
-    against git's record of the pre-change manifest — not assumed, and
-    not a file committed into vectors/ where it would itself register as
-    an artifact."""
+    """The gate for the bit-depth work: every artifact the suite produced
+    before the d10/d12 additions must still hash to the value it had then.
+
+    Anchored to the commit that introduced the multi-depth vectors
+    (6209083), resolving its parent — NOT to a relative HEAD~N, which
+    drifts every time a new commit lands and silently re-anchors the gate
+    to the wrong manifest."""
     import subprocess
 
     repo_root = pathlib.Path(__file__).resolve().parents[3]
     old = subprocess.run(
-        ["git", "show", "HEAD~4:tools/fcr-reference/vectors/manifest.json"],
+        ["git", "show",
+         "6209083~1:tools/fcr-reference/vectors/manifest.json"],
         capture_output=True, text=True, check=True, cwd=repo_root,
     ).stdout
     original = {a["name"]: a["sha256"] for a in json.loads(old)["artifacts"]}

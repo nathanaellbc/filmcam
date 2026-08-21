@@ -22,6 +22,7 @@ from .constants import (
     HEADER_SIZE,
     TRAILER_MAGIC,
 )
+from .audio import AudioMeta, pack_audio, unpack_audio
 from .framecodec import decode_frame, encode_frame
 
 # Wire order: magic, version, flags, width, height, bit_depth, ...
@@ -204,6 +205,30 @@ class FcrWriter:
         self._file.write(record)
         self._index.append((offset, len(record)))
 
+    def append_audio(self, payload: bytes, pts_ns: int, sample_rate_hz: int,
+                     channel_count: int, sample_format: int) -> None:
+        """Append a chunk of PCM as an AUD0 record, interleaved wherever the
+        caller emits it among the frame records. `pts_ns` is the host-clock
+        time of the chunk's first sample, on the same clock as frame pts."""
+        if self._header is None:
+            raise RuntimeError("write_header must be called first")
+        if self._header.version < 2:
+            raise ValueError(
+                f"embedded audio requires container version 2, "
+                f"this clip declares version {self._header.version}"
+            )
+        record = pack_audio(
+            payload,
+            sequence=len(self._audio_index),
+            pts_ns=pts_ns,
+            sample_rate_hz=sample_rate_hz,
+            channel_count=channel_count,
+            sample_format=sample_format,
+        )
+        offset = self._file.tell()
+        self._file.write(record)
+        self._audio_index.append((offset, len(record)))
+
     def finalize(self) -> None:
         index_offset = self._file.tell()
         self._file.write(struct.pack("<I", len(self._index)))
@@ -279,3 +304,9 @@ class FcrReader:
         )
         meta = FrameMeta(sequence, pts_ns, exposure_ns, iso, lens_position)
         return mosaic, meta
+
+    def read_audio(self, index: int) -> tuple[AudioMeta, bytes]:
+        """Return (metadata, PCM payload) for the audio chunk at `index`."""
+        offset, size = self._audio_index[index]
+        record = self._data[offset:offset + size]
+        return unpack_audio(record)

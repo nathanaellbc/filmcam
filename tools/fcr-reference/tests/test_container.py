@@ -229,3 +229,88 @@ def test_v1_committed_clip_reads_with_zero_audio():
     assert r.header.bit_depth == 14
     assert r.frame_count == 2
     assert r.audio_count == 0
+
+
+# --- Task 3: append_audio / read_audio (the vertical slice) ----------------
+
+
+def _pcm_s16(frames, channels=2, seed=0):
+    import struct as _s
+
+    count = frames * channels
+    return _s.pack(f"<{count}h", *[((seed + i) % 2000) - 1000 for i in range(count)])
+
+
+def test_append_audio_before_write_header_raises(tmp_path):
+    h = _header()
+    path = tmp_path / "clip.fcr"
+    w = FcrWriter(str(path))
+    with pytest.raises(RuntimeError):
+        w.append_audio(_pcm_s16(24000), pts_ns=0, sample_rate_hz=48000,
+                       channel_count=2, sample_format=0)
+
+
+def test_append_audio_on_a_v1_clip_raises(tmp_path):
+    """Audio requires version 2; a v1-stamped clip must refuse it loudly."""
+    h = dataclasses.replace(_header(), version=1)
+    path = tmp_path / "clip.fcr"
+    w = FcrWriter(str(path))
+    w.write_header(h)
+    with pytest.raises(ValueError, match="version"):
+        w.append_audio(_pcm_s16(24000), pts_ns=0, sample_rate_hz=48000,
+                       channel_count=2, sample_format=0)
+
+
+def test_interleaved_clip_roundtrips_frames_and_audio(tmp_path):
+    """The vertical slice: frames and audio chunks interleaved on disk read
+    back byte-identical, each through its own index."""
+    h = _header()  # v2 by default now
+    frames = [_frame(h, seed=i) for i in range(3)]
+    chunks = [_pcm_s16(24000, seed=i) for i in range(2)]
+    path = tmp_path / "clip.fcr"
+    w = FcrWriter(str(path))
+    w.write_header(h)
+    # Interleave: frame, audio, frame, audio, frame.
+    w.append_frame(frames[0], 0, 0, 20833333, 400, 0.5)
+    w.append_audio(chunks[0], pts_ns=0, sample_rate_hz=48000,
+                   channel_count=2, sample_format=0)
+    w.append_frame(frames[1], 1, 41_666_667, 20833333, 400, 0.5)
+    w.append_audio(chunks[1], pts_ns=500_000_000, sample_rate_hz=48000,
+                   channel_count=2, sample_format=0)
+    w.append_frame(frames[2], 2, 83_333_334, 20833333, 400, 0.5)
+    w.finalize()
+
+    r = FcrReader(str(path))
+    assert r.frame_count == 3
+    assert r.audio_count == 2
+    for i, want in enumerate(frames):
+        decoded, meta = r.read_frame(i)
+        assert np.array_equal(decoded, want)
+        assert meta.sequence == i
+    for i, want in enumerate(chunks):
+        meta, payload = r.read_audio(i)
+        assert payload == want
+        assert meta.sequence == i
+        assert meta.sample_rate_hz == 48000
+        assert meta.channel_count == 2
+
+
+def test_read_audio_validates_crc(tmp_path):
+    from fcrref.container import HEADER_SIZE
+
+    h = _header()
+    path = tmp_path / "clip.fcr"
+    w = FcrWriter(str(path))
+    w.write_header(h)
+    w.append_audio(_pcm_s16(24000), pts_ns=0, sample_rate_hz=48000,
+                   channel_count=2, sample_format=0)
+    w.finalize()
+
+    data = bytearray(path.read_bytes())
+    # Corrupt a byte inside the single audio chunk's payload.
+    data[HEADER_SIZE + 40] ^= 0xFF
+    path.write_bytes(bytes(data))
+
+    r = FcrReader(str(path))
+    with pytest.raises(ValueError, match="CRC"):
+        r.read_audio(0)

@@ -27,11 +27,53 @@ the zero-surgery alternative if the OpenCore work proves unappealing.
 - [ ] Confirm motherboard model + vendor (ASUS/MSI/Gigabyte/ASRock) and that it has an
       HDMI or DisplayPort out for the iGPU.
 - [ ] 16 GB+ USB stick for the installer.
-- [ ] A separate SSD/NVMe for macOS (cleanest multiboot; keep Windows and macOS apart).
+- [ ] Decide the **drive layout** (see "Dual-boot" below). A separate SSD/NVMe for macOS is
+      recommended; partitioning the existing 1TB+ drive is also viable.
 - [ ] iPhone 15 + USB cable, for deployment later.
 - [ ] Download on Windows first: [ProperTree](https://github.com/corpnewt/ProperTree),
       [GenSMBIOS](https://github.com/corpnewt/GenSMBIOS), Python, and the
       [OpenCore release](https://github.com/acidanthera/OpenCorePkg/releases).
+
+---
+
+## Dual-boot: keeping Windows and macOS apart
+
+You do **not** have to buy another drive — but a separate drive is the recommended path.
+The deciding factor is the **EFI partition** (the small FAT32 partition holding the
+bootloader): two drives each get their own, one drive forces them to share.
+
+### Option A — separate drive for macOS (recommended)
+
+Windows stays on the existing drive; macOS goes on a second drive. OpenCore lives on the
+macOS drive's EFI partition (or a USB stick). Each OS's bootloader is invisible to the
+other.
+
+- **Pros:** cleanest and safest. Windows feature updates can't clobber OpenCore, because
+  Windows can't see the macOS drive's EFI. Easiest to troubleshoot, and easiest to
+  nuke-and-retry if the first install goes sideways.
+- **Cons:** costs a drive (a cheap 250–500 GB NVMe is ~$30–50).
+
+### Option B — one drive, two partitions (works, riskier)
+
+Shrink the Windows partition, create a new APFS container for macOS, install there.
+OpenCore shares the single EFI partition.
+
+- **Pros:** no new hardware. A 1TB+ drive has plenty of room.
+- **Cons:** Windows feature updates are notorious for rewriting the EFI boot order and can
+  leave macOS unbootable until the boot entry is repaired. Partition resizing carries a
+  small data-loss risk — **back up first**. Keep OpenCore on a **USB stick** as a rescue
+  bootloader so a Windows update can't strand you.
+
+### Picking an OS at startup (either option)
+
+- OpenCore's boot picker lists all detected OSes (Windows, macOS, recovery); arrow-key to choose.
+- Set a **default** (e.g. boot Windows after a timeout) and pick macOS only when working on
+  FilmCam. Windows stays the daily driver.
+- Or use the motherboard's one-time boot menu (F8/F11/F12) to pick per-boot.
+
+**Recommendation:** Option A (a cheap dedicated SSD) for a first build — the safety net is
+worth the ~$35. Option B is acceptable on a 1TB+ drive if you back up first and keep a USB
+rescue bootloader handy.
 
 ## Phase 1 — BIOS settings (make-or-break)
 
@@ -69,13 +111,26 @@ Comet Lake). Key parts for this build:
 > via Windows Device Manager. (See Phase 3 for why the SSDT may be the safer choice on Tahoe.)
 
 ### DeviceProperties → iGPU (UHD 770 drives the display)
-Under `PciRoot(0x0)/Pci(0x2,0x0)`:
+
+**The UHD 770 (Raptor Lake) is not natively supported — it must be spoofed as a UHD 630.**
+This is the single most likely place to hit a black screen on first boot, so get it right
+before the install. Under `PciRoot(0x0)/Pci(0x2,0x0)`:
 
 ```
-AAPL,ig-platform-id      Data   07009B3E    (iGPU drives display; swap to 00009B3E on black screen)
+AAPL,ig-platform-id      Data   07009B3E    (hex BwCbPg==; iGPU drives display)
+device-id                Data   9B3E0000    (hex mz4AAA==; spoofs UHD 770 as UHD 630)
+enable-metal             Data   01000000    (hex AQAAAA==; Metal 3 + acceleration)
 framebuffer-patch-enable Data   01000000
 framebuffer-stolenmem    Data   00003001
 ```
+
+Notes:
+- `07009B3E` is for the iGPU driving a display. If the first boot black-screens, swap
+  `AAPL,ig-platform-id` to **`00009B3E`** (the headless variant) — this is the classic fix.
+- The `device-id` spoof to UHD 630 is what makes Tahoe's Metal acceleration work on the
+  UHD 770; without it you get the unaccelerated VESA fallback.
+- BIOS must have the iGPU enabled and DVMT Pre-Allocated at 64 MB (Phase 1) for this to
+  light up a display.
 
 ### Kexts (Lilu first; use ProperTree Cmd/Ctrl+Shift+R to order)
 - [ ] `Lilu` → `VirtualSMC` → `WhateverGreen` → `AppleALC` → `IntelMausi` → `NVMeFix` →

@@ -163,3 +163,56 @@ def test_inspect_dump_frame_writes_raw16(tmp_path):
     inspect.dump_frame(FcrReader(path), 0, str(out))
     loaded = np.fromfile(str(out), dtype="<u2").reshape(48, 64)
     assert np.array_equal(loaded, m)
+
+
+def test_inspect_reports_and_validates_audio(tmp_path, capsys):
+    import struct as _s
+
+    from conftest import build_frame, build_header
+    from fcrref.container import FcrWriter
+
+    h = build_header(width=64, height=48)  # v2 by default
+    path = str(tmp_path / "clip.fcr")
+    w = FcrWriter(path)
+    w.write_header(h)
+    w.append_frame(build_frame(h, seed=1), 0, 0, 20833333, 400, 0.5)
+    pcm = _s.pack("<4800h", *range(4800))  # 0.05 s of stereo s16
+    w.append_audio(pcm, pts_ns=0, sample_rate_hz=48000, channel_count=2,
+                   sample_format=0)
+    w.finalize()
+
+    reader = FcrReader(path)
+    assert inspect.check(reader) is True
+    out = capsys.readouterr().out
+    assert "audio chunks indexed: 1" in out
+    assert "48000 Hz" in out
+    assert "structure: OK" in out
+
+
+def test_inspect_flags_a_corrupt_audio_chunk(tmp_path, capsys):
+    import struct as _s
+
+    from conftest import build_frame, build_header
+    from fcrref.constants import HEADER_SIZE
+    from fcrref.container import FRAME_RECORD_SIZE, FcrWriter
+
+    h = build_header(width=64, height=48)
+    path = tmp_path / "clip.fcr"
+    w = FcrWriter(str(path))
+    w.write_header(h)
+    w.append_frame(build_frame(h, seed=1), 0, 0, 20833333, 400, 0.5)
+    pcm = _s.pack("<4800h", *range(4800))
+    w.append_audio(pcm, pts_ns=0, sample_rate_hz=48000, channel_count=2,
+                   sample_format=0)
+    w.finalize()
+
+    # Corrupt inside the audio chunk's payload, which sits after the frame.
+    reader = FcrReader(str(path))
+    audio_offset, _ = reader._audio_index[0]
+    data = bytearray(path.read_bytes())
+    data[audio_offset + 40] ^= 0xFF
+    path.write_bytes(bytes(data))
+
+    reader = FcrReader(str(path))
+    assert inspect.check(reader) is False
+    assert "audio 0: CRC MISMATCH" in capsys.readouterr().out

@@ -384,6 +384,46 @@ the file matching `FRM0` markers and validating CRCs, rebuilding the index. **A 
 exactly one frame** — the one in flight. Recovered clips appear in the library flagged
 `RECOVERED`.
 
+### 5.3.1 Embedded audio — container version 2
+
+Version 2 of the container adds first-class audio, so a single `.fcr` carries video and
+sound together. The model is the one MCRAW has proven — a second timestamped stream with its
+own index — adapted to `.fcr`'s append-only, crash-safe design.
+
+Audio travels in its own record type, `AUD0`, interleaved between the `FRM0` frame records
+(roughly every 0.5 s of sound). Every record — frame or audio — carries its own magic and
+CRC32, so the repair scan walks both kinds and a crash still costs only the in-flight record,
+now for audio as well as video.
+
+```
+"AUD0" magic (4 bytes)
+u32  sequence            audio-chunk sequence, monotonic from 0
+u64  pts_host_time_ns    host-clock time of the FIRST sample (same clock as frame pts, §5.5)
+u32  sample_rate_hz      e.g. 48000
+u16  channel_count       e.g. 2
+u8   sample_format       0 = s16le interleaved, 1 = f32le interleaved
+u8   flags               reserved, 0
+u32  payload_bytes
+u32  crc32               of the payload
+...  payload             channel_count × samples, interleaved, little-endian
+```
+
+Audio is stored as **raw PCM, uncompressed.** At 48 kHz stereo 16-bit that is ~192 KB/s —
+noise against the 125–271 MB/s video budget — so there is deliberately no audio codec.
+
+**Index and trailer (v2).** The index self-describes two counts, and the single trailer
+offset still points at the start of the whole region:
+
+```
+u32 frameCount,  [offset:u64, size:u32] × frameCount     (as v1)
+u32 audioCount,  [offset:u64, size:u32] × audioCount     (NEW in v2)
+trailer "FCRX" + indexOffset:u64
+```
+
+**Versioning.** New captures write version 2. Version 1 files — the video-only format of the
+committed conformance vectors — remain readable and simply have no audio records. A reader
+that only knows version 1 rejects a version 2 file cleanly at the version gate.
+
 ### 5.4 Lossless compression
 
 Mandatory, not an optimisation. 504 MB/s must become ~200 MB/s. This is the **highest-risk
@@ -443,6 +483,13 @@ independently of the video container.
 - Gaps in gyro delivery are recorded explicitly as marked spans, not interpolated away.
 - **Gyroflow-compatible GCSV export** from the library, so the user is never locked into our
   own stabilizer.
+
+**Audio shares the same clock.** The embedded `AUD0` records (§5.3.1) stamp each chunk's
+first sample on `CMClockGetHostTimeClock` — the same host clock as frame PTS and gyro. A/V
+sync in post is `audio_pts − first_frame_pts` at sample precision, never an "audio starts at
+zero" assumption that drifts over a take. Whether iOS delivers audio on this identical clock
+is a Phase 0 probe item (§4.1); the format is correct regardless, and the probe confirms the
+clock.
 
 **OIS must be disabled while recording** when post-stabilization is intended. Optical
 stabilization moves the lens in ways the gyro cannot observe, so a gyro-derived correction

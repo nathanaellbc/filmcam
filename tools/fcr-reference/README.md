@@ -45,3 +45,26 @@ vectors are unchanged. Conformance across depths is asserted by the suite:
 alongside the 14-bit set, each recorded in `manifest.json` under
 `supported_bit_depths`. A port is correct when it reproduces every SHA-256
 in the manifest at all three depths.
+
+## Embedded audio (container version 2)
+
+A `.fcr` can carry first-class audio alongside the video, so a single file
+holds both. Audio travels in its own `AUD0` record type, interleaved
+between the `FRM0` frame records (~0.5 s of sound per record), and is
+located through a parallel index appended at finalize — the model MCRAW
+proves, adapted to `.fcr`'s append-only, crash-safe design. Every record,
+frame or audio, carries its own magic and CRC32, so the repair scan walks
+both and a crash still costs only the in-flight record.
+
+- **Payload:** raw PCM, uncompressed — `s16le` (format 0) or `f32le`
+  (format 1), interleaved. ~192 KB/s at 48 kHz stereo, so no audio codec.
+- **Sync:** each chunk's `pts_ns` is the host-clock time of its first
+  sample, on the same clock as frame pts and the gyro sidecar (spec §5.5).
+  A/V sync is `audio_pts − first_frame_pts` at sample precision.
+- **Versioning:** new writes are version 2 with the parallel audio index.
+  Version 1 files (the video-only committed vectors) still read, with zero
+  audio. A v1-only reader rejects a v2 file cleanly at the version gate.
+
+The wire layout is in spec §5.3.1 and `src/fcrref/audio.py`. The conformance
+vector `clip_audio.fcr` (plus its source `audio_tone.s16`) gives a port a
+byte-exact audio path to validate against.

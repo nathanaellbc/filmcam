@@ -21,6 +21,8 @@ import zlib
 
 import numpy as np
 
+from .audio import AUDIO_RECORD_FMT, AUDIO_RECORD_SIZE
+from .constants import AUDIO_MAGIC
 from .container import (
     FRAME_MAGIC,
     FRAME_RECORD_FMT,
@@ -29,12 +31,35 @@ from .container import (
 )
 
 
+def _check_record(data, offset, expect_magic, fmt, fixed_size, label, index):
+    """Validate one record's magic, length and CRC. Returns ok."""
+    fields = struct.unpack_from(fmt, data, offset)
+    magic, sequence = fields[0], fields[1]
+    payload_bytes, crc = fields[-2], fields[-1]
+    if magic != expect_magic:
+        print(f"  {label} {index}: BAD MAGIC at offset {offset}")
+        return False
+    start = offset + fixed_size
+    payload = data[start:start + payload_bytes]
+    if len(payload) != payload_bytes:
+        print(f"  {label} {index}: TRUNCATED payload")
+        return False
+    if (zlib.crc32(payload) & 0xFFFFFFFF) != crc:
+        print(f"  {label} {index}: CRC MISMATCH")
+        return False
+    if sequence != index:
+        print(f"  {label} {index}: sequence field is {sequence}")
+        return False
+    return True
+
+
 def check(reader: FcrReader) -> bool:
-    """Validate structure and per-frame CRCs without decoding any frame."""
+    """Validate structure and per-record CRCs without decoding any payload."""
     h = reader.header
     print(
         f"header: {h.width}x{h.height}  {h.cfa_pattern}  "
-        f"{h.bit_depth}-bit  {h.frame_rate_num}/{h.frame_rate_den} fps"
+        f"{h.bit_depth}-bit  {h.frame_rate_num}/{h.frame_rate_den} fps  "
+        f"v{h.version}"
     )
     print(f"frames indexed: {reader.frame_count}")
 
@@ -42,25 +67,26 @@ def check(reader: FcrReader) -> bool:
     ok = True
     for i in range(reader.frame_count):
         offset, _ = reader._index[i]
-        (magic, sequence, pts_ns, _exp, _iso, _lens,
-         payload_bytes, crc) = struct.unpack_from(FRAME_RECORD_FMT, data, offset)
-        if magic != FRAME_MAGIC:
-            print(f"  frame {i}: BAD MAGIC at offset {offset}")
-            ok = False
-            continue
-        start = offset + FRAME_RECORD_SIZE
-        payload = data[start:start + payload_bytes]
-        if len(payload) != payload_bytes:
-            print(f"  frame {i}: TRUNCATED payload")
-            ok = False
-            continue
-        if (zlib.crc32(payload) & 0xFFFFFFFF) != crc:
-            print(f"  frame {i}: CRC MISMATCH")
-            ok = False
-            continue
-        if sequence != i:
-            print(f"  frame {i}: sequence field is {sequence}")
-            ok = False
+        ok &= _check_record(data, offset, FRAME_MAGIC, FRAME_RECORD_FMT,
+                            FRAME_RECORD_SIZE, "frame", i)
+
+    # Version 2 clips carry an interleaved audio stream, validated the same
+    # way. Version 1 clips simply report zero audio. Audio parameters are
+    # read straight from the record headers (not read_audio, which CRC-
+    # checks) so a corrupt chunk is reported by the loop below rather than
+    # raising here.
+    print(f"audio chunks indexed: {reader.audio_count}")
+    if reader.audio_count:
+        first_off, _ = reader._audio_index[0]
+        (_m, _s, _pts, rate, ch, fmt, _fl, _pb, _c) = struct.unpack_from(
+            AUDIO_RECORD_FMT, data, first_off
+        )
+        print(f"  {rate} Hz, {ch} ch, format {fmt}")
+        for i in range(reader.audio_count):
+            offset, _ = reader._audio_index[i]
+            ok &= _check_record(data, offset, AUDIO_MAGIC, AUDIO_RECORD_FMT,
+                                AUDIO_RECORD_SIZE, "audio", i)
+
     print("structure: OK" if ok else "structure: CORRUPT")
     return ok
 
